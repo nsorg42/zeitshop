@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zeitshop-converter"
+version = "0.1.0"
+description = "Primitive DIAMOND CSV to Wix CSV converter skeleton"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "charset-normalizer>=3.3.0",
+]
+
+[project.optional-dependencies]
+gui = [
+  "tksheet>=7.0.0",
+]
+dev = [
+  "pytest>=8.0.0",
+]
+
+[project.scripts]
+zeitshop-converter = "zeitshop_converter.main:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
