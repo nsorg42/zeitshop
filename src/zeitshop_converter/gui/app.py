@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from decimal import Decimal, InvalidOperation
 import importlib
 import json
-import os
 from pathlib import Path
-import subprocess
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from types import ModuleType
@@ -87,18 +86,38 @@ class ConverterApp(tk.Tk):
         self.settings = _load_settings()
         self.batch: ConversionBatch | None = None
         self.diamond_path: Path | None = None
-        self.output_path: Path | None = None
-        self.issue_path: Path | None = None
 
         self.selected_path_var = tk.StringVar(value="Keine Datei ausgewählt")
         self.summary_total_var = tk.StringVar(value="0")
         self.summary_valid_var = tk.StringVar(value="0")
+        self.search_var = tk.StringVar(value="")
         self._primary_button_style = "Primary.TButton"
+        self._preview_columns = (
+            "artikel_nr",
+            "name",
+            "brand",
+            "plain_description",
+            "price",
+            "cost",
+            "referenznummer",
+        )
+        self._column_labels = {
+            "artikel_nr": "Artikel Nr",
+            "name": "Name",
+            "brand": "Marke",
+            "plain_description": "Kurzbeschreibung",
+            "price": "Preis",
+            "cost": "Einstand",
+            "referenznummer": "Referenznummer",
+        }
+        self._sort_column: str | None = None
+        self._sort_desc = False
 
         self._settings_window: tk.Toplevel | None = None
 
         self._configure_style()
         self._build_ui()
+        self.search_var.trace_add("write", lambda *_args: self._render_preview())
         self._update_summary_metrics()
 
     def _configure_style(self) -> None:
@@ -165,7 +184,7 @@ class ConverterApp(tk.Tk):
 
         ttk.Label(
             root,
-            text="DIAMOND-Datei (.csv/.xlsx) auswählen, automatisch konvertieren, Wix-CSV erhalten.",
+            text="DIAMOND-Datei (.csv/.xlsx) auswählen, konvertieren, und Wix-CSV herunterladen.",
             style="SubHeader.TLabel",
         ).pack(fill="x", pady=(2, 12))
 
@@ -231,57 +250,63 @@ class ConverterApp(tk.Tk):
         table_card = ttk.Frame(root, padding=10, style="Card.TFrame")
         table_card.pack(fill="both", expand=True)
 
-        columns = ("name", "brand", "plain_description", "price", "cost", "referenznummer")
+        actions_row = ttk.Frame(table_card, style="Card.TFrame")
+        actions_row.pack(fill="x", pady=(0, 8))
+        self.download_wix_button = ttk.Button(
+            actions_row,
+            text="Wix-CSV herunterladen",
+            style="Secondary.TButton",
+            command=self._download_wix_csv,
+            state="disabled",
+        )
+        self.download_wix_button.pack(side="left")
+
+        self.download_issue_button = ttk.Button(
+            actions_row,
+            text="Fehler/Warnungen herunterladen",
+            style="Secondary.TButton",
+            command=self._download_issue_csv,
+            state="disabled",
+        )
+        self.download_issue_button.pack(side="left", padx=(8, 0))
+
+        search_row = ttk.Frame(table_card, style="Card.TFrame")
+        search_row.pack(fill="x", pady=(0, 8))
+        ttk.Label(search_row, text="Suche:", style="Muted.TLabel").pack(side="left")
+        ttk.Entry(search_row, textvariable=self.search_var, width=42).pack(side="left", padx=(8, 8))
+        ttk.Button(search_row, text="Löschen", command=lambda: self.search_var.set("")).pack(side="left")
+
         table_grid = ttk.Frame(table_card, style="Card.TFrame")
         table_grid.pack(fill="both", expand=True)
         table_grid.columnconfigure(0, weight=1)
         table_grid.rowconfigure(0, weight=1)
 
-        self.preview = ttk.Treeview(table_grid, columns=columns, show="headings", height=18)
+        self.preview = ttk.Treeview(table_grid, columns=self._preview_columns, show="headings", height=18)
         self.preview.grid(row=0, column=0, sticky="nsew")
 
         preview_scrollbar = ttk.Scrollbar(table_grid, orient="vertical", command=self.preview.yview)
         preview_scrollbar.grid(row=0, column=1, sticky="ns", padx=(8, 0))
         self.preview.configure(yscrollcommand=preview_scrollbar.set)
 
-        self.preview.heading("name", text="Name")
-        self.preview.heading("brand", text="Marke")
-        self.preview.heading("plain_description", text="Kurzbeschreibung")
-        self.preview.heading("price", text="Preis")
-        self.preview.heading("cost", text="Einstand")
-        self.preview.heading("referenznummer", text="Referenznummer")
+        for column in self._preview_columns:
+            self.preview.heading(
+                column,
+                text=self._column_labels[column],
+                command=lambda selected=column: self._toggle_sort(selected),
+            )
 
-        self.preview.column("name", width=280)
+        self.preview.column("artikel_nr", width=110, anchor="center")
+        self.preview.column("name", width=260)
         self.preview.column("brand", width=130)
-        self.preview.column("plain_description", width=360)
-        self.preview.column("price", width=110, anchor="e")
-        self.preview.column("cost", width=110, anchor="e")
+        self.preview.column("plain_description", width=280)
+        self.preview.column("price", width=100, anchor="e")
+        self.preview.column("cost", width=100, anchor="e")
         self.preview.column("referenznummer", width=170, anchor="center")
 
         self.preview.tag_configure("even", background="#ffffff")
         self.preview.tag_configure("odd", background="#f8fafc")
         self.preview.tag_configure("error", background="#ffe4e6")
         self.preview.tag_configure("warning", background="#fff7db")
-
-        footer = ttk.Frame(root, style="Root.TFrame")
-        footer.pack(fill="x", pady=(10, 0))
-        self.open_wix_button = ttk.Button(
-            footer,
-            text="Wix-CSV öffnen",
-            style="Secondary.TButton",
-            command=lambda: self._open_path(self.output_path),
-            state="disabled",
-        )
-        self.open_wix_button.pack(side="left")
-
-        self.open_error_button = ttk.Button(
-            footer,
-            text="Fehler/Warnungen öffnen",
-            style="Secondary.TButton",
-            command=lambda: self._open_path(self.issue_path),
-            state="disabled",
-        )
-        self.open_error_button.pack(side="left", padx=(8, 0))
 
     def _open_settings_window(self) -> None:
         """Open a focused settings dialog for advanced options."""
@@ -406,7 +431,7 @@ class ConverterApp(tk.Tk):
         )
 
     def _run_conversion(self) -> None:
-        """Convert selected input and write output files automatically."""
+        """Convert selected input and keep results in memory until download."""
         if self.diamond_path is None:
             messagebox.showerror("Fehlende Datei", "Bitte zuerst eine DIAMOND-Datei auswählen.")
             return
@@ -417,25 +442,16 @@ class ConverterApp(tk.Tk):
             messagebox.showerror("Konvertierung fehlgeschlagen", str(exc))
             return
 
-        try:
-            self._write_default_exports()
-        except OSError as exc:  # pragma: no cover - GUI runtime path
-            messagebox.showerror("Dateifehler", f"Ausgabedateien konnten nicht geschrieben werden:\n{exc}")
-            return
-
         self._render_preview()
+        self.download_wix_button.configure(state="normal")
+        has_issues = any(result.issues for result in self.batch.results)
+        self.download_issue_button.configure(state="normal" if has_issues else "disabled")
 
         assert self.batch is not None
-        output_name = self.output_path.name if self.output_path is not None else ""
-        if self.issue_path is not None:
-            issue_text = self.issue_path.name
-        else:
-            issue_text = "keine (0 Fehler/Warnungen)"
         messagebox.showinfo(
             "Konvertierung abgeschlossen",
             (
-                f"Wix-CSV: {output_name}\n"
-                f"Fehler-/Warnungsbericht: {issue_text}\n\n"
+                "Wix-CSV wurde erstellt und ist zum Download bereit.\n\n"
                 f"Produkte gesamt: {len(self.batch.results)}\n"
                 f"Gültig: {len(self.batch.valid_rows)}\n"
                 f"Fehler: {self.batch.error_count}\n"
@@ -443,51 +459,174 @@ class ConverterApp(tk.Tk):
             ),
         )
 
-    def _resolve_output_directory(self) -> Path:
-        """Compute output directory from settings or input file location."""
-        assert self.diamond_path is not None
+    def _default_download_directory(self) -> Path:
+        """Prefer configured output directory, then input-file folder, then home."""
         configured = self.settings.output_dir.strip()
         if configured:
             return Path(configured).expanduser()
-        return self.diamond_path.parent
+        if self.diamond_path is not None:
+            return self.diamond_path.parent
+        return Path.home()
 
-    def _write_default_exports(self) -> None:
-        """Write output files using settings-defined directory and default names."""
-        assert self.diamond_path is not None
-        assert self.batch is not None
+    def _default_wix_filename(self) -> str:
+        """Build default Wix export filename based on source file name."""
+        if self.diamond_path is None:
+            return "wix_import.csv"
+        return f"{self.diamond_path.stem}_wix_import.csv"
 
-        output_dir = self._resolve_output_directory()
-        output_dir.mkdir(parents=True, exist_ok=True)
-        issues_dir = output_dir / "issues"
-        issues_dir.mkdir(parents=True, exist_ok=True)
+    def _default_issue_filename(self, severity: Severity | None = None) -> str:
+        """Build default issue filename for full or severity-specific reports."""
+        stem = self.diamond_path.stem if self.diamond_path is not None else "conversion"
+        if severity == Severity.ERROR:
+            return f"{stem}_fehler.csv"
+        if severity == Severity.WARNING:
+            return f"{stem}_warnungen.csv"
+        return f"{stem}_issues.csv"
 
-        stem = self.diamond_path.stem
-        self.output_path = output_dir / f"{stem}_wix_import.csv"
-        self.issue_path = issues_dir / f"{stem}_issues.csv"
+    def _download_wix_csv(self) -> None:
+        """Save in-memory Wix rows to a user-chosen CSV file."""
+        if self.batch is None:
+            messagebox.showerror("Keine Daten", "Bitte zuerst eine Datei konvertieren.")
+            return
 
-        write_wix_csv(path=self.output_path, header=self.batch.header, rows=self.batch.valid_rows)
+        target = filedialog.asksaveasfilename(
+            title="Wix-CSV speichern",
+            defaultextension=".csv",
+            initialdir=str(self._default_download_directory()),
+            initialfile=self._default_wix_filename(),
+            filetypes=(
+                ("CSV Dateien", "*.csv"),
+                ("Alle Dateien", "*.*"),
+            ),
+        )
+        if not target:
+            return
 
-        issue_rows = [result for result in self.batch.results if result.issues]
-        if issue_rows:
-            write_issue_csv(path=self.issue_path, issue_rows=issue_rows)
+        try:
+            write_wix_csv(path=target, header=self.batch.header, rows=self.batch.valid_rows)
+        except OSError as exc:
+            messagebox.showerror("Dateifehler", f"Wix-CSV konnte nicht gespeichert werden:\n{exc}")
+            return
+
+        messagebox.showinfo("Export", f"Wix-CSV gespeichert: {Path(target).name}")
+
+    def _download_issue_csv(self, severity: Severity | None = None) -> None:
+        """Save issue rows (all, only errors, or only warnings) to CSV."""
+        if self.batch is None:
+            messagebox.showerror("Keine Daten", "Bitte zuerst eine Datei konvertieren.")
+            return
+
+        if severity is None:
+            issue_rows = [result for result in self.batch.results if result.issues]
         else:
-            # Remove stale file from earlier runs so "no issues" means no file.
-            if self.issue_path.exists():
-                self.issue_path.unlink()
-            self.issue_path = None
+            issue_rows = [
+                result
+                for result in self.batch.results
+                if any(issue.severity == severity for issue in result.issues)
+            ]
 
-        self.open_wix_button.configure(state="normal")
-        self.open_error_button.configure(state="normal" if self.issue_path is not None else "disabled")
+        if not issue_rows:
+            messagebox.showinfo("Hinweis", "Keine passenden Probleme vorhanden.")
+            return
+
+        target = filedialog.asksaveasfilename(
+            title="Fehler-/Warnungsbericht speichern",
+            defaultextension=".csv",
+            initialdir=str(self._default_download_directory()),
+            initialfile=self._default_issue_filename(severity),
+            filetypes=(
+                ("CSV Dateien", "*.csv"),
+                ("Alle Dateien", "*.*"),
+            ),
+        )
+        if not target:
+            return
+
+        try:
+            write_issue_csv(path=target, issue_rows=issue_rows)
+        except OSError as exc:
+            messagebox.showerror("Dateifehler", f"Bericht konnte nicht gespeichert werden:\n{exc}")
+            return
+
+        messagebox.showinfo("Export", f"Bericht gespeichert: {Path(target).name}")
+
+    def _value_for_column(self, result, column: str) -> str:
+        """Return displayed value for a preview column."""
+        if column == "artikel_nr":
+            return result.source.get("Artikel Nr", "")
+        if column == "name":
+            return result.wix_row.get("name", "")
+        if column == "brand":
+            return result.wix_row.get("brand", "")
+        if column == "plain_description":
+            return result.wix_row.get("plainDescription", "")
+        if column == "price":
+            return result.wix_row.get("price", "")
+        if column == "cost":
+            return result.wix_row.get("cost", "")
+        if column == "referenznummer":
+            return result.wix_row.get("barcode", "")
+        return ""
+
+    def _matches_search(self, result) -> bool:
+        """Check whether one row matches the current free-text query."""
+        query = self.search_var.get().strip().casefold()
+        if not query:
+            return True
+
+        searchable = " ".join(
+            self._value_for_column(result, column).casefold()
+            for column in self._preview_columns
+        )
+        return all(token in searchable for token in query.split())
+
+    def _sort_key(self, result, column: str):
+        """Build stable sort keys for clickable header sorting."""
+        value = self._value_for_column(result, column).strip()
+        if column in {"artikel_nr", "price", "cost"}:
+            if not value:
+                return (1, Decimal(0), "")
+            try:
+                return (0, Decimal(value), "")
+            except (InvalidOperation, ValueError):
+                return (2, Decimal(0), value.casefold())
+        return value.casefold()
+
+    def _refresh_heading_labels(self) -> None:
+        """Show active sort direction in header captions."""
+        for column in self._preview_columns:
+            label = self._column_labels[column]
+            if column == self._sort_column:
+                suffix = " ▼" if self._sort_desc else " ▲"
+                label = f"{label}{suffix}"
+            self.preview.heading(column, text=label)
+
+    def _toggle_sort(self, column: str) -> None:
+        """Toggle ascending/descending sorting when user clicks a header."""
+        if self._sort_column == column:
+            self._sort_desc = not self._sort_desc
+        else:
+            self._sort_column = column
+            self._sort_desc = False
+        self._render_preview()
 
     def _render_preview(self) -> None:
         """Show conversion results in the table and update summary text."""
         if self.batch is None:
+            self._refresh_heading_labels()
             return
 
         for item in self.preview.get_children():
             self.preview.delete(item)
 
-        for index, result in enumerate(self.batch.results):
+        visible_results = [result for result in self.batch.results if self._matches_search(result)]
+        if self._sort_column is not None:
+            visible_results.sort(
+                key=lambda result: self._sort_key(result, self._sort_column or ""),
+                reverse=self._sort_desc,
+            )
+
+        for index, result in enumerate(visible_results):
             tags = ["even" if index % 2 == 0 else "odd"]
             if result.has_errors:
                 tags.append("error")
@@ -498,16 +637,18 @@ class ConverterApp(tk.Tk):
                 "",
                 "end",
                 values=(
-                    result.wix_row.get("name", ""),
-                    result.wix_row.get("brand", ""),
-                    result.wix_row.get("plainDescription", ""),
-                    result.wix_row.get("price", ""),
-                    result.wix_row.get("cost", ""),
-                    result.wix_row.get("barcode", ""),
+                    self._value_for_column(result, "artikel_nr"),
+                    self._value_for_column(result, "name"),
+                    self._value_for_column(result, "brand"),
+                    self._value_for_column(result, "plain_description"),
+                    self._value_for_column(result, "price"),
+                    self._value_for_column(result, "cost"),
+                    self._value_for_column(result, "referenznummer"),
                 ),
                 tags=tuple(tags),
             )
 
+        self._refresh_heading_labels()
         self._update_summary_metrics()
 
     def _update_summary_metrics(self) -> None:
@@ -537,7 +678,7 @@ class ConverterApp(tk.Tk):
         )
 
     def _open_issue_report(self, severity: Severity) -> None:
-        """Open issue report for selected severity without extra preview dialogs."""
+        """Download issue report for selected severity."""
         if self.batch is None:
             messagebox.showinfo("Hinweis", "Noch keine Konvertierung vorhanden.")
             return
@@ -553,33 +694,7 @@ class ConverterApp(tk.Tk):
             messagebox.showinfo("Hinweis", f"Keine {title_label.lower()} vorhanden.")
             return
 
-        if self.issue_path is None or not self.issue_path.exists():
-            messagebox.showinfo(
-                "Hinweis",
-                "Es gibt Probleme in der Konvertierung, aber der Bericht wurde noch nicht erstellt.",
-            )
-            return
-
-        self._open_path(self.issue_path)
-
-    def _open_path(self, path: Path | None) -> None:
-        """Open a generated file with the default system application."""
-        if path is None:
-            messagebox.showerror("Keine Datei", "Noch keine Ausgabedatei vorhanden.")
-            return
-        if not path.exists():
-            messagebox.showerror("Datei fehlt", f"Datei nicht gefunden:\n{path}")
-            return
-
-        try:
-            if os.name == "nt":  # pragma: no cover - windows path
-                os.startfile(path)  # type: ignore[attr-defined]
-            elif os.name == "posix":
-                subprocess.run(["xdg-open", str(path)], check=False)
-            else:
-                messagebox.showinfo("Datei", f"Datei liegt hier:\n{path}")
-        except Exception as exc:  # pragma: no cover - GUI runtime path
-            messagebox.showerror("Öffnen fehlgeschlagen", str(exc))
+        self._download_issue_csv(severity=severity)
 
 
 def run_gui() -> None:
