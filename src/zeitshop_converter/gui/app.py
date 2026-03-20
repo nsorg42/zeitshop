@@ -28,8 +28,8 @@ def _load_sv_ttk() -> ModuleType | None:
 sv_ttk = _load_sv_ttk()
 
 from ..conversion import convert_diamond_file
-from ..core import ConversionBatch, ConversionOptions
-from ..io import write_error_csv, write_wix_csv
+from ..core import ConversionBatch, ConversionOptions, Severity
+from ..io import write_issue_csv, write_wix_csv
 
 _SETTINGS_PATH = Path.home() / ".zeitshop_converter" / "gui_settings.json"
 
@@ -39,13 +39,8 @@ class GuiSettings:
     """Persisted GUI options hidden from the main screen."""
 
     handle_prefix: str = "ds-"
-    default_visible: bool = False
-    inventory_mode: str = "numeric"
+    default_visible: bool = True
     output_dir: str = ""
-
-    @property
-    def numeric_inventory(self) -> bool:
-        return self.inventory_mode != "stock"
 
 
 def _load_settings() -> GuiSettings:
@@ -64,10 +59,6 @@ def _load_settings() -> GuiSettings:
     settings.handle_prefix = handle_prefix or "ds-"
 
     settings.default_visible = bool(payload.get("default_visible", settings.default_visible))
-
-    inventory_mode = str(payload.get("inventory_mode", settings.inventory_mode)).strip().lower()
-    if inventory_mode in {"numeric", "stock"}:
-        settings.inventory_mode = inventory_mode
 
     output_dir = str(payload.get("output_dir", settings.output_dir)).strip()
     settings.output_dir = output_dir
@@ -97,16 +88,18 @@ class ConverterApp(tk.Tk):
         self.batch: ConversionBatch | None = None
         self.diamond_path: Path | None = None
         self.output_path: Path | None = None
-        self.error_path: Path | None = None
+        self.issue_path: Path | None = None
 
         self.selected_path_var = tk.StringVar(value="Keine Datei ausgewählt")
-        self.summary_var = tk.StringVar(value="Wähle eine Datei aus. Die App erstellt die Wix-CSV automatisch.")
+        self.summary_total_var = tk.StringVar(value="0")
+        self.summary_valid_var = tk.StringVar(value="0")
         self._primary_button_style = "Primary.TButton"
 
         self._settings_window: tk.Toplevel | None = None
 
         self._configure_style()
         self._build_ui()
+        self._update_summary_metrics()
 
     def _configure_style(self) -> None:
         """Apply a light modern ttk style that works on Windows and Linux."""
@@ -135,6 +128,9 @@ class ConverterApp(tk.Tk):
         style.configure("CardTitle.TLabel", background=card_bg, font=("Segoe UI", 11, "bold"), foreground="#0f172a")
         style.configure("PathValue.TLabel", background=card_bg, foreground="#0f172a")
         style.configure("Muted.TLabel", background=card_bg, foreground="#64748b")
+        style.configure("SummaryLabel.TLabel", background=card_bg, foreground="#334155", font=("Segoe UI", 10, "bold"))
+        style.configure("SummaryValue.TLabel", background=card_bg, foreground="#0f172a")
+        style.configure("Link.TLabel", background=card_bg, foreground="#2563eb", font=("Segoe UI", 10, "underline"))
         style.configure("Secondary.TButton", padding=(12, 8))
         style.configure("Primary.TButton", font=("Segoe UI", 11, "bold"), padding=(16, 10))
         style.configure(
@@ -205,12 +201,37 @@ class ConverterApp(tk.Tk):
 
         summary_card = ttk.Frame(root, padding=12, style="Card.TFrame")
         summary_card.pack(fill="x", pady=(10, 10))
-        ttk.Label(summary_card, textvariable=self.summary_var, style="PathValue.TLabel").pack(fill="x")
+        summary_grid = ttk.Frame(summary_card, style="Card.TFrame")
+        summary_grid.pack(fill="x")
+
+        ttk.Label(summary_grid, text="Zeilen:", style="SummaryLabel.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(summary_grid, textvariable=self.summary_total_var, style="SummaryValue.TLabel").grid(
+            row=0,
+            column=1,
+            sticky="w",
+            padx=(4, 18),
+        )
+
+        ttk.Label(summary_grid, text="Gültig:", style="SummaryLabel.TLabel").grid(row=0, column=2, sticky="w")
+        ttk.Label(summary_grid, textvariable=self.summary_valid_var, style="SummaryValue.TLabel").grid(
+            row=0,
+            column=3,
+            sticky="w",
+            padx=(4, 18),
+        )
+
+        self.error_link = ttk.Label(summary_grid, text="", style="Link.TLabel", cursor="hand2")
+        self.error_link.grid(row=0, column=4, sticky="w", padx=(0, 18))
+        self.error_link.bind("<Button-1>", lambda _event: self._open_issue_report(Severity.ERROR))
+
+        self.warning_link = ttk.Label(summary_grid, text="", style="Link.TLabel", cursor="hand2")
+        self.warning_link.grid(row=0, column=5, sticky="w")
+        self.warning_link.bind("<Button-1>", lambda _event: self._open_issue_report(Severity.WARNING))
 
         table_card = ttk.Frame(root, padding=10, style="Card.TFrame")
         table_card.pack(fill="both", expand=True)
 
-        columns = ("zeile", "status", "name", "preis", "bestand", "artikelnummer")
+        columns = ("name", "brand", "plain_description", "price", "cost", "referenznummer")
         table_grid = ttk.Frame(table_card, style="Card.TFrame")
         table_grid.pack(fill="both", expand=True)
         table_grid.columnconfigure(0, weight=1)
@@ -223,19 +244,19 @@ class ConverterApp(tk.Tk):
         preview_scrollbar.grid(row=0, column=1, sticky="ns", padx=(8, 0))
         self.preview.configure(yscrollcommand=preview_scrollbar.set)
 
-        self.preview.heading("zeile", text="Zeile")
-        self.preview.heading("status", text="Status")
-        self.preview.heading("name", text="Produktname")
-        self.preview.heading("preis", text="Preis")
-        self.preview.heading("bestand", text="Bestand")
-        self.preview.heading("artikelnummer", text="Artikelnummer")
+        self.preview.heading("name", text="Name")
+        self.preview.heading("brand", text="Marke")
+        self.preview.heading("plain_description", text="Kurzbeschreibung")
+        self.preview.heading("price", text="Preis")
+        self.preview.heading("cost", text="Einstand")
+        self.preview.heading("referenznummer", text="Referenznummer")
 
-        self.preview.column("zeile", width=70, anchor="center")
-        self.preview.column("status", width=100, anchor="center")
-        self.preview.column("name", width=560)
-        self.preview.column("preis", width=110, anchor="e")
-        self.preview.column("bestand", width=120, anchor="center")
-        self.preview.column("artikelnummer", width=140, anchor="center")
+        self.preview.column("name", width=280)
+        self.preview.column("brand", width=130)
+        self.preview.column("plain_description", width=360)
+        self.preview.column("price", width=110, anchor="e")
+        self.preview.column("cost", width=110, anchor="e")
+        self.preview.column("referenznummer", width=170, anchor="center")
 
         self.preview.tag_configure("even", background="#ffffff")
         self.preview.tag_configure("odd", background="#f8fafc")
@@ -255,9 +276,9 @@ class ConverterApp(tk.Tk):
 
         self.open_error_button = ttk.Button(
             footer,
-            text="Fehler-CSV öffnen",
+            text="Fehler/Warnungen öffnen",
             style="Secondary.TButton",
-            command=lambda: self._open_path(self.error_path),
+            command=lambda: self._open_path(self.issue_path),
             state="disabled",
         )
         self.open_error_button.pack(side="left", padx=(8, 0))
@@ -290,7 +311,6 @@ class ConverterApp(tk.Tk):
 
         handle_prefix_var = tk.StringVar(value=self.settings.handle_prefix)
         visible_var = tk.BooleanVar(value=self.settings.default_visible)
-        inventory_mode_var = tk.StringVar(value=self.settings.inventory_mode)
         output_dir_var = tk.StringVar(
             value=self.settings.output_dir or "Standard: gleicher Ordner wie die Eingabedatei",
         )
@@ -307,24 +327,8 @@ class ConverterApp(tk.Tk):
             variable=visible_var,
         ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(12, 0))
 
-        inventory_box = ttk.LabelFrame(form, text="Bestandsmodus", padding=10)
-        inventory_box.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(12, 0))
-
-        ttk.Radiobutton(
-            inventory_box,
-            text="Numerisch (z. B. 0, 1, 2, ...)",
-            variable=inventory_mode_var,
-            value="numeric",
-        ).pack(anchor="w")
-        ttk.Radiobutton(
-            inventory_box,
-            text="Nur Lagerstatus (IN_STOCK / OUT_OF_STOCK)",
-            variable=inventory_mode_var,
-            value="stock",
-        ).pack(anchor="w", pady=(6, 0))
-
         output_box = ttk.LabelFrame(form, text="Ausgabeordner", padding=10)
-        output_box.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        output_box.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(12, 0))
         output_box.columnconfigure(0, weight=1)
 
         ttk.Label(
@@ -350,13 +354,9 @@ class ConverterApp(tk.Tk):
 
         def on_save() -> None:
             prefix = handle_prefix_var.get().strip() or "ds-"
-            mode = inventory_mode_var.get().strip().lower()
-            if mode not in {"numeric", "stock"}:
-                mode = "numeric"
 
             self.settings.handle_prefix = prefix
             self.settings.default_visible = visible_var.get()
-            self.settings.inventory_mode = mode
             output_dir_text = output_dir_var.get().strip()
             if output_dir_text.startswith("Standard:"):
                 self.settings.output_dir = ""
@@ -401,7 +401,7 @@ class ConverterApp(tk.Tk):
         """Create converter options from persisted settings."""
         return ConversionOptions(
             default_visible=self.settings.default_visible,
-            numeric_inventory=self.settings.numeric_inventory,
+            numeric_inventory=True,
             handle_prefix=self.settings.handle_prefix,
         )
 
@@ -427,15 +427,15 @@ class ConverterApp(tk.Tk):
 
         assert self.batch is not None
         output_name = self.output_path.name if self.output_path is not None else ""
-        if self.error_path is not None:
-            error_text = self.error_path.name
+        if self.issue_path is not None:
+            issue_text = self.issue_path.name
         else:
-            error_text = "keine (0 Fehler)"
+            issue_text = "keine (0 Fehler/Warnungen)"
         messagebox.showinfo(
             "Konvertierung abgeschlossen",
             (
                 f"Wix-CSV: {output_name}\n"
-                f"Fehler-CSV: {error_text}\n\n"
+                f"Fehler-/Warnungsbericht: {issue_text}\n\n"
                 f"Produkte gesamt: {len(self.batch.results)}\n"
                 f"Gültig: {len(self.batch.valid_rows)}\n"
                 f"Fehler: {self.batch.error_count}\n"
@@ -458,23 +458,26 @@ class ConverterApp(tk.Tk):
 
         output_dir = self._resolve_output_directory()
         output_dir.mkdir(parents=True, exist_ok=True)
+        issues_dir = output_dir / "issues"
+        issues_dir.mkdir(parents=True, exist_ok=True)
 
         stem = self.diamond_path.stem
         self.output_path = output_dir / f"{stem}_wix_import.csv"
-        self.error_path = output_dir / f"{stem}_fehler.csv"
+        self.issue_path = issues_dir / f"{stem}_issues.csv"
 
         write_wix_csv(path=self.output_path, header=self.batch.header, rows=self.batch.valid_rows)
 
-        if self.batch.error_rows:
-            write_error_csv(path=self.error_path, error_rows=self.batch.error_rows)
+        issue_rows = [result for result in self.batch.results if result.issues]
+        if issue_rows:
+            write_issue_csv(path=self.issue_path, issue_rows=issue_rows)
         else:
-            # Remove stale file from earlier runs so "no errors" means no file.
-            if self.error_path.exists():
-                self.error_path.unlink()
-            self.error_path = None
+            # Remove stale file from earlier runs so "no issues" means no file.
+            if self.issue_path.exists():
+                self.issue_path.unlink()
+            self.issue_path = None
 
         self.open_wix_button.configure(state="normal")
-        self.open_error_button.configure(state="normal" if self.error_path is not None else "disabled")
+        self.open_error_button.configure(state="normal" if self.issue_path is not None else "disabled")
 
     def _render_preview(self) -> None:
         """Show conversion results in the table and update summary text."""
@@ -487,32 +490,77 @@ class ConverterApp(tk.Tk):
         for index, result in enumerate(self.batch.results):
             tags = ["even" if index % 2 == 0 else "odd"]
             if result.has_errors:
-                status = "FEHLER"
                 tags.append("error")
             elif result.has_warnings:
-                status = "WARNUNG"
                 tags.append("warning")
-            else:
-                status = "OK"
 
             self.preview.insert(
                 "",
                 "end",
                 values=(
-                    result.source_row,
-                    status,
                     result.wix_row.get("name", ""),
+                    result.wix_row.get("brand", ""),
+                    result.wix_row.get("plainDescription", ""),
                     result.wix_row.get("price", ""),
-                    result.wix_row.get("inventory", ""),
-                    result.wix_row.get("sku", ""),
+                    result.wix_row.get("cost", ""),
+                    result.wix_row.get("barcode", ""),
                 ),
                 tags=tuple(tags),
             )
 
-        self.summary_var.set(
-            f"Zeilen: {len(self.batch.results)} | Gültig: {len(self.batch.valid_rows)} | "
-            f"Fehler: {self.batch.error_count} | Warnungen: {self.batch.warning_count}"
+        self._update_summary_metrics()
+
+    def _update_summary_metrics(self) -> None:
+        """Refresh summary counters and clickable issue links."""
+        if self.batch is None:
+            total = 0
+            valid = 0
+            error_count = 0
+            warning_count = 0
+        else:
+            total = len(self.batch.results)
+            valid = len(self.batch.valid_rows)
+            error_count = self.batch.error_count
+            warning_count = self.batch.warning_count
+
+        self.summary_total_var.set(str(total))
+        self.summary_valid_var.set(str(valid))
+        self.error_link.configure(
+            text=f"Fehler: {error_count}",
+            cursor="hand2" if error_count > 0 else "arrow",
+            style="Link.TLabel" if error_count > 0 else "SummaryValue.TLabel",
         )
+        self.warning_link.configure(
+            text=f"Warnungen: {warning_count}",
+            cursor="hand2" if warning_count > 0 else "arrow",
+            style="Link.TLabel" if warning_count > 0 else "SummaryValue.TLabel",
+        )
+
+    def _open_issue_report(self, severity: Severity) -> None:
+        """Open issue report for selected severity without extra preview dialogs."""
+        if self.batch is None:
+            messagebox.showinfo("Hinweis", "Noch keine Konvertierung vorhanden.")
+            return
+
+        if severity == Severity.ERROR:
+            issue_count = self.batch.error_count
+            title_label = "Fehler"
+        else:
+            issue_count = self.batch.warning_count
+            title_label = "Warnungen"
+
+        if issue_count == 0:
+            messagebox.showinfo("Hinweis", f"Keine {title_label.lower()} vorhanden.")
+            return
+
+        if self.issue_path is None or not self.issue_path.exists():
+            messagebox.showinfo(
+                "Hinweis",
+                "Es gibt Probleme in der Konvertierung, aber der Bericht wurde noch nicht erstellt.",
+            )
+            return
+
+        self._open_path(self.issue_path)
 
     def _open_path(self, path: Path | None) -> None:
         """Open a generated file with the default system application."""

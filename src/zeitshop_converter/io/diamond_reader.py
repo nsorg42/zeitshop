@@ -114,6 +114,33 @@ def _has_product_identity(canonical_row: Mapping[str, str]) -> bool:
     )
 
 
+def _tokenize_header_candidate(value: str) -> str:
+    """Normalize a text token for robust header-like row comparisons."""
+    return re.sub(r"[^0-9a-z]+", "", normalize_text(value).casefold())
+
+
+_HEADER_TOKENS = {
+    column: _tokenize_header_candidate(column) for column in CANONICAL_COLUMNS
+}
+_IDENTITY_COLUMNS = ("Artikel Nr", "Referenz", "Kurzbeschreibung")
+
+
+def _is_header_like_row(canonical_row: Mapping[str, str]) -> bool:
+    """Detect repeated in-body header rows from paginated DIAMOND exports."""
+    matches = 0
+    identity_matches = 0
+
+    for column, expected_token in _HEADER_TOKENS.items():
+        value_token = _tokenize_header_candidate(canonical_row.get(column, ""))
+        if not value_token or value_token != expected_token:
+            continue
+        matches += 1
+        if column in _IDENTITY_COLUMNS:
+            identity_matches += 1
+
+    return identity_matches >= 1 and matches >= 3
+
+
 def _parse_column_index(cell_ref: str) -> int:
     """Convert Excel cell reference (e.g. 'C10') to zero-based column index."""
     match = _CELL_REF_RE.match(cell_ref)
@@ -276,6 +303,8 @@ def read_diamond_csv(path: str | Path) -> list[DiamondRecord]:
         # Ignore footer rows that carry totals but no product identity.
         if not _has_product_identity(canonical):
             continue
+        if _is_header_like_row(canonical):
+            continue
 
         records.append(DiamondRecord(source_row=source_row, data=canonical))
 
@@ -346,6 +375,8 @@ def read_diamond_xlsx(path: str | Path) -> list[DiamondRecord]:
         canonical = _canonicalize_row(row_map)
 
         if not _has_product_identity(canonical):
+            continue
+        if _is_header_like_row(canonical):
             continue
 
         records.append(DiamondRecord(source_row=source_row, data=canonical))

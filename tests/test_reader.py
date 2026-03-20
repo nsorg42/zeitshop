@@ -107,6 +107,42 @@ def test_reader_dispatches_by_extension(tmp_path: Path) -> None:
     assert xlsx_records[0].data["Artikel Nr"] == "11"
 
 
+def test_reader_skips_repeated_header_rows_in_csv(tmp_path: Path) -> None:
+    file_path = tmp_path / "diamond.csv"
+    file_path.write_text(
+        "Filiale;Artikel Nr;Kurzbeschreibung;Referenz;Menge;Einstand;Verkauf\n"
+        "Filiale;Artikel Nr;Kurzbeschreibung;Referenz;Menge;Einstand;Verkauf\n"
+        "Am Bogen;10;Sample;REF-10;1;5;9\n",
+        encoding="utf-8",
+    )
+
+    records = read_diamond_csv(file_path)
+
+    assert len(records) == 1
+    assert records[0].source_row == 3
+    assert records[0].data["Artikel Nr"] == "10"
+
+
+def test_reader_skips_repeated_header_rows_in_xlsx(tmp_path: Path) -> None:
+    file_path = tmp_path / "diamond.xlsx"
+
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.append(["Artikel Nr", "Kurzbeschreibung", "Referenz", "Menge", "Einstand", "Verkauf"])
+    worksheet.append(["11", "Sample A", "REF-11", 1, "5", "9"])
+    worksheet.append(["Artikel Nr", "Kurzbeschreibung", "Referenz", "Menge", "Einstand", "Verkauf"])
+    worksheet.append(["12", "Sample B", "REF-12", 2, "6", "10"])
+    workbook.save(file_path)
+
+    records = read_diamond_xlsx(file_path)
+
+    assert len(records) == 2
+    assert records[0].source_row == 2
+    assert records[0].data["Artikel Nr"] == "11"
+    assert records[1].source_row == 4
+    assert records[1].data["Artikel Nr"] == "12"
+
+
 def test_reader_rejects_unsupported_file_extension(tmp_path: Path) -> None:
     file_path = tmp_path / "diamond.txt"
     file_path.write_text("test", encoding="utf-8")
