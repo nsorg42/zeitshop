@@ -16,6 +16,9 @@ ENV/
 .hypothesis/
 .tox/
 .nox/
+*.csv
+*.mdc
+testing_data/
 
 # Coverage reports
 .coverage
@@ -46,3 +49,7 @@ Thumbs.db
 
 # Generated converter outputs
 out/
+
+*.csv
+*.mdc
+testing_data/

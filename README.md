@@ -1,18 +1,18 @@
 # Zeitshop Converter
 
-This project is a local Python application that converts product exports from DIAMOND SEVEN into a Wix-compatible import CSV. The codebase is designed so that the conversion logic is independent from the graphical interface, which means the same conversion engine can be run from a desktop window or from the command line, and it can also be tested automatically. The target audience is a small business workflow where someone exports a CSV from inventory software, runs the converter, and then imports the generated file into Wix.
+This project is a local Python application that converts product exports from DIAMOND SEVEN (CSV or XLSX) into a Wix-compatible import CSV. The codebase is designed so that the conversion logic is independent from the graphical interface, which means the same conversion engine can be run from a desktop window or from the command line, and it can also be tested automatically. The target audience is a small business workflow where someone exports inventory data, runs the converter, and then imports the generated file into Wix.
 
 The application is intentionally simple at this stage and should be understood as an alpha version. Alpha here means the most important path works end-to-end, but some advanced business rules can still be added later as real usage reveals edge cases. Even in this early stage, the architecture is already structured in a clean way so future changes stay manageable.
 
 ## What this project does in practical terms
 
-When you run a conversion, the program reads the DIAMOND file in a tolerant way because real-world CSV files are often inconsistent. The reader handles unknown text encodings and varying delimiters, it removes empty placeholder columns, and it normalizes the incoming columns into one canonical internal schema. After reading, the core pipeline transforms each logical product into the Wix format, applies validation rules for Wix-critical fields, and writes a final output CSV with exactly the same column order as the Wix template header.
+When you run a conversion, the program reads the DIAMOND file in a tolerant way. For CSV inputs, the reader handles unknown text encodings and varying delimiters. For XLSX inputs, it auto-detects the header row even when reports include preamble rows and image columns. In both cases, it removes empty placeholder columns and normalizes incoming columns into one canonical internal schema. After reading, the core pipeline transforms each logical product into the Wix format, applies validation rules for Wix-critical fields, and writes a final output CSV with exactly the same column order as the Wix template header.
 
 A crucial detail in this project is that duplicate product rows in DIAMOND exports are merged by product identity before writing Wix rows. This matters for data like Maurice Lacroix where the same article appears in multiple branches. The merge step combines them into one unique product row and sums quantities, which avoids import conflicts caused by repeated products.
 
-## Detailed conversion process from DIAMOND CSV to Wix CSV
+## Detailed conversion process from DIAMOND export to Wix CSV
 
-The conversion pipeline is deterministic and happens in clearly separated phases. The first phase is raw file ingestion. The converter reads the DIAMOND CSV as bytes, then detects text encoding in a defensive order. It first tries UTF-8 variants, then Windows-style codepages such as cp1252, and finally falls back to a permissive decoder if needed. This approach is necessary because Windows export tools often produce files that look like text but are not UTF-8, and decoding incorrectly at this step can silently corrupt product names or price strings.
+The conversion pipeline is deterministic and happens in clearly separated phases. The first phase is raw file ingestion. For CSV files, the converter reads bytes and detects text encoding in a defensive order. It first tries UTF-8 variants, then Windows-style codepages such as cp1252, and finally falls back to a permissive decoder if needed. This approach is necessary because Windows export tools often produce files that look like text but are not UTF-8, and decoding incorrectly at this step can silently corrupt product names or price strings. For XLSX files, the converter reads the first worksheet and detects the most likely header row by matching canonical DIAMOND column names.
 
 After decoding, the second phase is delimiter and structure detection. DIAMOND exports are often semicolon-delimited, but this is not guaranteed, so the converter uses CSV dialect sniffing to infer separators. It then reads the header row and removes structural noise such as empty header columns and optional media helper columns like `Bild` that are irrelevant for the current Wix import mode. At this point, the converter maps incoming header labels into one canonical internal schema so downstream logic can assume consistent keys like `Artikel Nr`, `Menge`, `Einstand`, and `Verkauf`.
 
@@ -38,7 +38,7 @@ The easiest way to understand the control and data flow is to picture this path:
 
 ## End-to-end flow from a beginner perspective
 
-If you start from the GUI, the application window asks for a DIAMOND CSV and a Wix template CSV. Once you click convert, the GUI passes both paths and the selected options into `convert_diamond_file`. That function reads raw DIAMOND records through `read_diamond_csv`, reads the template header through `load_template_header`, and calls `convert_records` to transform data. The result object contains all converted rows plus per-row issues.
+If you start from the GUI, the application window asks for a DIAMOND CSV or XLSX file. The Wix template header is baked into the application, so you do not need to select a template file each time. Once you click convert, the GUI passes the selected options into `convert_diamond_file`. That function reads raw DIAMOND records through `read_diamond_file`, loads the built-in template header through `load_template_header`, and calls `convert_records` to transform data. The result object contains all converted rows plus per-row issues.
 
 After conversion, the GUI paints a preview table and marks row status as OK, WARNING, or ERROR depending on validation. If you click export, the GUI calls `write_wix_csv` to save valid rows and optionally `write_error_csv` to save problematic rows with explanations. The CLI path does the same operations, just without a desktop window.
 
@@ -92,7 +92,7 @@ This module marks the package root and exposes package-level symbols. It defines
 
 ### `src/zeitshop_converter/conversion.py`
 
-This module provides one high-level function named `convert_diamond_file`. The function accepts input file paths plus options, reads DIAMOND records through `io.read_diamond_csv`, loads Wix headers through `io.load_template_header`, and delegates conversion to `core.convert_records`.
+This module provides one high-level function named `convert_diamond_file`. The function accepts input file paths plus options, reads DIAMOND records through `io.read_diamond_file`, loads Wix headers through `io.load_template_header`, and delegates conversion to `core.convert_records`.
 
 This file is intentionally small because it acts as the seam between file-level I/O and pure transformation logic. Its simplicity is a design strength because orchestration is easy to understand and test.
 
@@ -152,7 +152,7 @@ This module contains encoding and CSV dialect detection logic. It imports the st
 
 This module reads DIAMOND files into canonical `DiamondRecord` objects. It imports `csv`, `StringIO`, `Path`, normalization helpers, and detect helpers. It defines canonical column names and alias mapping so minor header variations are normalized.
 
-The key function `read_diamond_csv` reads bytes, detects encoding, sniffs delimiter, removes useless columns, normalizes row dictionaries, skips empty/footer summary rows, and returns structured records with source row positions. This gives the core layer predictable input.
+The key reader functions are `read_diamond_csv`, `read_diamond_xlsx`, and the dispatch helper `read_diamond_file`. They normalize CSV and XLSX exports to the same canonical row shape, skip empty/footer summary rows, and return structured records with source row positions. This gives the core layer predictable input.
 
 ### `src/zeitshop_converter/io/wix_template.py`
 
@@ -202,7 +202,7 @@ This test verifies that template validation fails when required columns are miss
 
 The runtime starts in `main.py`. If the user chooses GUI mode, `run_gui` builds a window and waits for actions. When conversion is requested, GUI code calls `convert_diamond_file`. If the user chooses CLI mode, `main.py` parses arguments and calls the same conversion function. In both paths, the actual conversion path is identical.
 
-Inside `convert_diamond_file`, DIAMOND input is parsed by `read_diamond_csv` and template schema is loaded by `load_template_header`. Then `convert_records` performs merge, mapping, and validation. A `ConversionBatch` returns all results plus convenience subsets. Writers serialize either valid rows or error rows to disk. This shared path guarantees that GUI and CLI produce consistent data.
+Inside `convert_diamond_file`, DIAMOND input is parsed by `read_diamond_file` and template schema is loaded by `load_template_header`. Then `convert_records` performs merge, mapping, and validation. A `ConversionBatch` returns all results plus convenience subsets. Writers serialize either valid rows or error rows to disk. This shared path guarantees that GUI and CLI produce consistent data.
 
 ## How this relates to Windows app development for beginners
 
@@ -221,8 +221,28 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -e .[dev]
 pytest -q
-PYTHONPATH=src python -m zeitshop_converter.main convert --diamond "Thomas Sabo.CSV" --template "Wix_Templates_Products_Without_Categories_CSV.csv" --output out/wix_import_thomas_sabo.csv --error-output out/error_thomas_sabo.csv
-PYTHONPATH=src python -m zeitshop_converter.main convert --diamond "Maurice Lacroix Uhren.CSV" --template "Wix_Templates_Products_Without_Categories_CSV.csv" --output out/wix_import_maurice_lacroix.csv --error-output out/error_maurice_lacroix.csv
+PYTHONPATH=src python -m zeitshop_converter.main convert --diamond "Thomas Sabo.CSV" --output out/wix_import_thomas_sabo.csv --error-output out/error_thomas_sabo.csv
+PYTHONPATH=src python -m zeitshop_converter.main convert --diamond "Maurice Lacroix Uhren.CSV" --output out/wix_import_maurice_lacroix.csv --error-output out/error_maurice_lacroix.csv
+PYTHONPATH=src python -m zeitshop_converter.main gui
+```
+
+## Quick Linux test workflow (CLI and GUI)
+
+Even though distribution will later target Windows, you can develop and test everything on Linux first. The converter logic and CLI run the same way on Linux. For GUI tests, Tkinter must be available in your Python installation. On Debian or Ubuntu based systems, install it with `sudo apt install python3-tk` if the GUI does not start.
+
+For CLI testing on Linux, create and activate a virtual environment, install dependencies, and run conversion directly with the built-in template.
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .[dev]
+PYTHONPATH=src python -m zeitshop_converter.main convert --diamond "Thomas Sabo.CSV" --output out/wix_import_thomas_sabo.csv --error-output out/error_thomas_sabo.csv
+```
+
+For GUI testing on Linux, use the same environment and start the GUI entrypoint. You only need to select the DIAMOND CSV/XLSX export, because the Wix template header is now built into the app.
+
+```bash
+source .venv/bin/activate
 PYTHONPATH=src python -m zeitshop_converter.main gui
 ```
 

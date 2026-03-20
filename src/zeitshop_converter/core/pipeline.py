@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections import OrderedDict
-
 from .mapping import map_diamond_to_wix_row
 from .models import (
     ConversionBatch,
@@ -15,15 +13,24 @@ from .models import (
 from .normalize import normalize_text, parse_quantity
 from .validation import validate_wix_row
 
-
 def _record_identity(record: DiamondRecord) -> str:
+    """Build a stable grouping key for duplicate rows.
+
+    Artikel number is the primary identity. If unavailable, referenz is used.
+    As a last fallback we use source row, which keeps the row unique.
+    """
+
     article_nr = normalize_text(record.data.get("Artikel Nr"))
     referenz = normalize_text(record.data.get("Referenz"))
     return article_nr or referenz or f"row-{record.source_row}"
 
 
 def _merge_records_by_identity(records: list[DiamondRecord]) -> list[DiamondRecord]:
-    grouped: OrderedDict[str, list[DiamondRecord]] = OrderedDict()
+    """Merge duplicate DIAMOND rows that represent the same product.
+    The merge keeps the first row as base, fills missing text fields from later
+    rows, and sums quantities when they can be parsed."""
+
+    grouped: dict[str, list[DiamondRecord]] = {}
     for record in records:
         key = _record_identity(record)
         grouped.setdefault(key, []).append(record)
@@ -65,6 +72,8 @@ def convert_records(
     template_header: list[str],
     options: ConversionOptions | None = None,
 ) -> ConversionBatch:
+    """Convert canonical DIAMOND records into Wix rows with validation issues."""
+
     active_options = options or ConversionOptions()
     merged_records = _merge_records_by_identity(records)
     seen_handles: Counter[str] = Counter()

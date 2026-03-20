@@ -1,17 +1,20 @@
 from __future__ import annotations
-
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Mapping
 
 
 class Severity(str, Enum):
+    """Issue severity used by validation and mapping diagnostics."""
+
     ERROR = "ERROR"
     WARNING = "WARNING"
 
 
 @dataclass(frozen=True)
 class ValidationIssue:
+    """One problem found while mapping or validating a row."""
+
     source_row: int
     field: str
     severity: Severity
@@ -20,12 +23,16 @@ class ValidationIssue:
 
 @dataclass(frozen=True)
 class DiamondRecord:
+    """Canonicalized source row from a DIAMOND CSV file."""
+
     source_row: int
     data: Mapping[str, str]
 
 
 @dataclass(frozen=True)
 class ConversionOptions:
+    """User-configurable behavior flags for conversion."""
+
     default_visible: bool = False
     numeric_inventory: bool = True
     handle_prefix: str = "ds-"
@@ -33,6 +40,8 @@ class ConversionOptions:
 
 @dataclass
 class WixRowResult:
+    """Final Wix row plus all issues detected for this source record."""
+
     source_row: int
     source: Mapping[str, str]
     wix_row: dict[str, str]
@@ -49,6 +58,8 @@ class WixRowResult:
 
 @dataclass
 class ConversionBatch:
+    """Container for all conversion results and convenience filters."""
+
     header: list[str]
     results: list[WixRowResult]
 

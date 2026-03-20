@@ -15,6 +15,7 @@ _INTEGER_RE = re.compile(r"^-?\d+$")
 
 
 def _parse_decimal(text: str) -> Decimal | None:
+    """Safe decimal parser for validator checks (returns None on invalid)."""
     if not text:
         return None
     try:
@@ -24,6 +25,7 @@ def _parse_decimal(text: str) -> Decimal | None:
 
 
 def _validate_cost_precision(text: str) -> bool:
+    """Check Wix-style cost precision rules for whole and fractional digits."""
     value = _parse_decimal(text)
     if value is None:
         return False
@@ -39,6 +41,8 @@ def _validate_cost_precision(text: str) -> bool:
 
 
 def validate_wix_row(row: Mapping[str, str], source_row: int) -> list[ValidationIssue]:
+    """Validate one mapped Wix row and return all detected issues."""
+
     issues: list[ValidationIssue] = []
 
     field_type = normalize_text(row.get("fieldType"))

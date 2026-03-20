@@ -8,6 +8,15 @@ from ..core.models import WixRowResult
 
 
 def write_error_csv(path: str | Path, error_rows: Sequence[WixRowResult]) -> int:
+    """Write an error report CSV with source fields and issue messages.
+
+    Parameters
+    ----------
+    path:
+        Output file location.
+    error_rows:
+        Conversion rows that contain blocking issues.
+    """
     file_path = Path(path)
     file_path.parent.mkdir(parents=True, exist_ok=True)
 

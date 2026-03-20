@@ -9,6 +9,7 @@ _HANDLE_RE = re.compile(r"[^a-z0-9-]+")
 
 
 def normalize_text(value: str | None) -> str:
+    """Trim a string and collapse repeated whitespace to single spaces."""
     if value is None:
         return ""
     text = _SPACE_RE.sub(" ", value.strip())
@@ -16,12 +17,18 @@ def normalize_text(value: str | None) -> str:
 
 
 def parse_decimal(value: str | None) -> Decimal | None:
+    """Parse human-entered decimal values, including Swiss separators.
+
+    Returns `None` for empty input and raises `ValueError` for invalid numbers.
+    """
     text = normalize_text(value)
     if not text:
         return None
 
+    # Remove common thousands separators seen in CH exports.
     text = text.replace("’", "").replace("'", "").replace(" ", "")
 
+    # If both comma and dot exist, the last one is treated as decimal mark.
     if "," in text and "." in text:
         last_comma = text.rfind(",")
         last_dot = text.rfind(".")
@@ -40,6 +47,7 @@ def parse_decimal(value: str | None) -> Decimal | None:
 
 
 def format_decimal(value: Decimal | None, places: int = 2) -> str:
+    """Format Decimal as fixed-point string with given decimal places."""
     if value is None:
         return ""
     quant = Decimal("1").scaleb(-places)
@@ -47,6 +55,7 @@ def format_decimal(value: Decimal | None, places: int = 2) -> str:
 
 
 def parse_quantity(value: str | None) -> int | None:
+    """Parse quantity input and return integer quantity when possible."""
     text = normalize_text(value)
     if not text:
         return None
@@ -68,6 +77,11 @@ def parse_quantity(value: str | None) -> int | None:
 
 
 def normalize_inventory(value: str | None, numeric_inventory: bool = True) -> str:
+    """Convert raw quantity into Wix inventory value.
+
+    numeric_inventory=True returns string quantities like "3".
+    numeric_inventory=False returns status enums like IN_STOCK/OUT_OF_STOCK.
+    """
     qty = parse_quantity(value)
     if qty is None:
         return "OUT_OF_STOCK" if not numeric_inventory else "0"
@@ -77,6 +91,7 @@ def normalize_inventory(value: str | None, numeric_inventory: bool = True) -> st
 
 
 def make_handle(raw: str | None, prefix: str = "ds-") -> str:
+    """Create a URL-safe handle string from free-form text."""
     body = normalize_text(raw).lower()
     body = body.replace(" ", "-")
     body = _HANDLE_RE.sub("", body)
