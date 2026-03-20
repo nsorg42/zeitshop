@@ -59,7 +59,7 @@ def test_pipeline_maps_valid_and_invalid_rows() -> None:
     assert valid["inventory"] == "3"
 
 
-def test_pipeline_warns_on_duplicate_sku() -> None:
+def test_pipeline_merges_duplicate_article_numbers() -> None:
     records = [
         DiamondRecord(
             source_row=2,
@@ -82,12 +82,13 @@ def test_pipeline_warns_on_duplicate_sku() -> None:
                 "Kurzbeschreibung": "Two",
                 "Verkauf": "11",
                 "Einstand": "5.5",
-                "Menge": "1",
+                "Menge": "2",
             },
         ),
     ]
 
     batch = convert_records(records, _template_header(), ConversionOptions())
-    second = batch.results[1]
-    assert second.has_warnings
-    assert any("Duplicate SKU detected" in issue.message for issue in second.issues)
+    assert len(batch.results) == 1
+    row = batch.results[0].wix_row
+    assert row["sku"] == "DUP-1"
+    assert row["inventory"] == "3"
