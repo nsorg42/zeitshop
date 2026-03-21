@@ -2,9 +2,7 @@
 
 Zeitshop Converter is a local Python application that turns DIAMOND product exports into Wix product import CSVs.
 
-It is intentionally narrow in scope. The converter expects DIAMOND-style exports, maps them into Wix's CSV structure, and can optionally migrate product images into Wix Media Manager so the generated import file contains matching `MEDIA` rows.
-
-There is no server component. Outside of optional Wix image uploads, everything runs locally.
+The converter expects DIAMOND-style `.csv` and `.xlsx` exports, maps them into Wix's CSV structure, and can optionally export product images into Wix Media Manager for automated migration.
 
 ## What It Does
 
@@ -25,7 +23,6 @@ There is no server component. Outside of optional Wix image uploads, everything 
 ## Scope And Limitations
 
 - The mapping is purpose-built for a specific DIAMOND-to-Wix workflow, not a generic ETL framework.
-- The GUI and issue export are German-language because the intended operators are German-speaking.
 - Private customer exports and large sample files are intentionally not included in this repository.
 
 ## Requirements
@@ -171,6 +168,8 @@ Run the test suite:
 ```bash
 pytest -q
 ```
+
+GitHub Actions now also runs `.github/workflows/ci.yml` automatically on every push and pull request. That workflow installs the project with development dependencies and runs `pytest`, so GitHub will show whether the branch is green before you merge it.
 
 Project layout:
 
