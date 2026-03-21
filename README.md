@@ -1,163 +1,189 @@
 # Zeitshop Converter
 
-Zeitshop Converter is a local desktop tool for converting DIAMOND product exports into Wix import CSV files.
+Zeitshop Converter is a local Python application that turns DIAMOND product exports into Wix product import CSVs.
 
-It is built for a simple workflow:
+It is intentionally narrow in scope. The converter expects DIAMOND-style exports, maps them into Wix's CSV structure, and can optionally migrate product images into Wix Media Manager so the generated import file contains matching `MEDIA` rows.
 
-1. Select a DIAMOND `.csv` or `.xlsx` export.
-2. Convert it into the Wix product CSV format.
-3. Review warnings or errors.
-4. Export the final Wix-ready file.
+There is no server component. Outside of optional Wix image uploads, everything runs locally.
 
-The project is a local Python application with a Tkinter GUI and an optional CLI. There is no server component.
-
-## Functionality Overview
+## What It Does
 
 - Reads DIAMOND exports from `.csv` and `.xlsx`
 - Detects CSV encoding and delimiter automatically
-- Normalizes incoming DIAMOND columns into a fixed internal schema
-- Merges duplicate products by article number, with reference as fallback
-- Sums inventory when duplicate rows represent the same product
-- Maps DIAMOND data into the Wix product CSV structure
-- Uses a built-in Wix template header by default
-- Validates important Wix fields and records row-level warnings/errors
-- Lets users export the main Wix CSV and a separate issue report from the GUI
-- Supports both GUI and CLI usage
+- Normalizes DIAMOND columns into a fixed internal product schema
+- Merges duplicate product rows by article number, with reference as fallback
+- Aggregates inventory when duplicate rows describe the same product
+- Maps source data into Wix `PRODUCT` rows
+- Validates required Wix fields and writes a separate issue report
+- Resolves product images from:
+  - explicit values in the DIAMOND `Bild` column
+  - a local image directory
+  - embedded images inside `.xlsx` exports
+- Optionally uploads local images to Wix Media Manager and emits Wix `MEDIA` rows
+- Supports both a Tkinter GUI and a CLI
+
+## Scope And Limitations
+
+- The mapping is purpose-built for a specific DIAMOND-to-Wix workflow, not a generic ETL framework.
+- The GUI and issue export are German-language because the intended operators are German-speaking.
+- Private customer exports and large sample files are intentionally not included in this repository.
 
 ## Requirements
 
 - Python 3.10 or newer
-- Windows 10/11 for the packaged desktop build
+- Tkinter available in the Python installation if you want to use the GUI
+- Windows if you want the packaged desktop build
 
-## Installation On Windows
+## Installation
 
-You have two practical options.
+Install the application from source:
 
-### Option 1: Use the packaged app
-
-If you already have a built zip package:
-
-1. Extract `ZeitshopConverter-windows.zip`
-2. Open the extracted folder
-3. Run `ZeitshopConverter.exe`
-
-Notes:
-
-- This is an unsigned internal app, so Windows SmartScreen may show a warning on first launch.
-- No separate Python installation is needed for the packaged app.
-
-### Option 2: Build the Windows app from this repository
-
-Install Python 3.10+ first.
-
-Then open `cmd.exe` in the repository root and run:
-
-```bat
-scripts\build_windows.cmd
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -e .[gui]
 ```
 
-Or in PowerShell:
+Install development dependencies as well if you want to run the test suite:
+
+```bash
+pip install -e .[gui,dev]
+```
+
+On Windows PowerShell, activate the virtual environment with:
+
+```powershell
+.venv\Scripts\Activate.ps1
+```
+
+## Quick Start
+
+### GUI
+
+Launch the desktop app:
+
+```bash
+python -m zeitshop_converter.main gui
+```
+
+The GUI lets you:
+
+- choose a DIAMOND export
+- run the conversion immediately
+- review counts, warnings, and errors
+- download the Wix CSV
+- download a German issue report
+- configure optional image migration settings
+
+### CLI
+
+Convert a DIAMOND export into a Wix CSV:
+
+```bash
+python -m zeitshop_converter.main convert \
+  --diamond input.xlsx \
+  --output out/wix_import.csv \
+  --issues-output out/issues.csv
+```
+
+Useful options:
+
+- `--template path/to/template.csv`: use a custom Wix template header instead of the built-in one
+- `--default-visible`: write `visible=TRUE`
+- `--inventory-mode stock`: write `IN_STOCK` / `OUT_OF_STOCK` instead of numeric inventory
+- `--handle-prefix ds-`: change the generated handle prefix
+- `--images-dir path/to/images`: scan a local directory recursively for matching product images
+- `--export-embedded-images`: extract embedded workbook images from `.xlsx` inputs and write a mapping CSV
+- `--image-export-dir path/to/export`: control where extracted workbook images are written
+- `--wix-site-id` and `--wix-api-key`: enable automatic upload of local images to Wix Media Manager
+- `--wix-image-path /zeitshop`: control the target folder path inside Wix Media Manager
+
+Environment variables are supported for Wix credentials:
+
+```bash
+export ZEITSHOP_WIX_SITE_ID="your-site-id"
+export ZEITSHOP_WIX_API_KEY="your-api-key"
+```
+
+Example with automatic image upload:
+
+```bash
+python -m zeitshop_converter.main convert \
+  --diamond input.xlsx \
+  --images-dir product_images \
+  --output out/wix_import.csv \
+  --issues-output out/issues.csv
+```
+
+## Embedded XLSX Images
+
+If a DIAMOND `.xlsx` export contains embedded worksheet images, you can extract them without running a full conversion:
+
+```bash
+python -m zeitshop_converter.main export-images \
+  --diamond input.xlsx \
+  --output-dir out/extracted_images \
+  --mapping-output out/image_mapping.csv
+```
+
+This writes:
+
+- the extracted image files
+- a CSV showing which source row each extracted image was matched to
+
+When image migration is enabled during conversion, extracted workbook images are treated like normal local image files and can be uploaded to Wix automatically.
+
+## Output Files
+
+Depending on the workflow, the converter can generate:
+
+- a Wix import CSV with valid `PRODUCT` rows
+- additional Wix `MEDIA` rows for resolved product images
+- a German issue report CSV containing row-level errors and warnings
+- an extracted image directory and image-mapping CSV for `.xlsx` image inspection
+
+## Windows Build
+
+To package the GUI as a Windows desktop app:
 
 ```powershell
 ./scripts/build_windows.ps1
 ```
 
-This produces:
+Or from `cmd.exe`:
+
+```bat
+scripts\build_windows.cmd
+```
+
+The build produces:
 
 - `dist\ZeitshopConverter\`
 - `dist\ZeitshopConverter-windows.zip`
 
-The zip file is the mail-ready artifact.
-
-## Running From Source
-
-### Windows
-
-```powershell
-py -3 -m venv .venv
-.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-pip install -e .[gui,dev]
-python -m zeitshop_converter.main gui
-```
-
-### Linux
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-pip install -e .[gui,dev]
-PYTHONPATH=src python -m zeitshop_converter.main gui
-```
-
-## CLI Usage
-
-Convert a DIAMOND export from the command line:
-
-```bash
-python -m zeitshop_converter.main convert \
-  --diamond "input.xlsx" \
-  --output "out/wix_import.csv" \
-  --error-output "out/issues.csv"
-```
-
-Useful options:
-
-- `--default-visible` sets `visible=TRUE`
-- `--inventory-mode stock` writes `IN_STOCK` / `OUT_OF_STOCK`
-- `--handle-prefix ds-` controls generated handles
-- `--template path/to/template.csv` uses a custom Wix template header
-
-## GUI Usage
-
-Start the desktop app:
-
-```bash
-python -m zeitshop_converter.main gui
-```
-
-In the GUI you can:
-
-- Select a DIAMOND `.csv` or `.xlsx` file
-- Run the conversion directly
-- Review row counts, warnings, and errors
-- Search and sort the preview table
-- Export the Wix CSV
-- Export issue reports for errors and warnings
+There is also a GitHub Actions workflow in `.github/workflows/build-windows-app.yml` for manual Windows builds.
 
 ## Development
 
-Install development dependencies:
-
-```bash
-pip install -e .[gui,dev]
-```
-
-Run tests:
+Run the test suite:
 
 ```bash
 pytest -q
 ```
 
-## Project Structure
+Project layout:
 
 ```text
 src/zeitshop_converter/
-  core/    business rules, mapping, validation, normalization
-  io/      file readers, template loading, CSV writers
+  core/    conversion rules, normalization, validation, mapping
+  io/      readers, writers, template loading, image extraction/upload helpers
   gui/     Tkinter desktop application
   main.py  CLI and GUI entrypoint
 ```
 
-## Output Files
-
-The app can generate:
-
-- a Wix import CSV containing valid rows
-- an issue CSV containing row-level warnings and errors
-
 ## Notes
 
-- The built-in Wix template header is used unless you explicitly pass a custom template in CLI mode.
-- The project is designed for local conversion workflows and does not require internet access during normal use.
+- The built-in Wix template header is used unless you explicitly pass a custom template.
+- Image uploads require network access. Conversion without Wix uploads is fully local.
+- Embedded image extraction works with the first worksheet in the workbook, which matches the converter's main import workflow.

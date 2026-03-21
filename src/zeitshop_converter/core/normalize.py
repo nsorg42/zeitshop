@@ -71,9 +71,14 @@ def parse_quantity(value: str | None) -> int | None:
         text = text.replace(",", ".")
 
     try:
-        return int(Decimal(text))
+        quantity = Decimal(text)
     except InvalidOperation as exc:
         raise ValueError(f"invalid quantity value: {value!r}") from exc
+
+    if quantity != quantity.to_integral_value():
+        raise ValueError(f"invalid quantity value: {value!r}")
+
+    return int(quantity)
 
 
 def normalize_inventory(value: str | None, numeric_inventory: bool = True) -> str:

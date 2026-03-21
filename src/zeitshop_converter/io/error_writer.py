@@ -9,8 +9,32 @@ from ..core.models import Severity, ValidationIssue, WixRowResult
 
 _DUP_HANDLE_RE = re.compile(r"^Duplicate handle detected\. Auto-adjusted to '(.+)'\.$")
 _DUP_SKU_RE = re.compile(r"^Duplicate SKU detected: '(.+)'\.$")
+_UNMERGED_IDENTITY_RE = re.compile(
+    r"^Duplicate identity '(.+)' was not merged across source rows (.+) because (.+)\.$"
+)
 _INVALID_DECIMAL_RE = re.compile(r"^invalid decimal value: (.+)$")
 _INVALID_QTY_RE = re.compile(r"^invalid quantity value: (.+)$")
+_IMAGE_REF_RE = re.compile(r"^Image reference could not be resolved: '(.+)'\.$")
+_UNSUPPORTED_IMAGE_RE = re.compile(r"^Unsupported image file type: '(.+)'\.$")
+_LOCAL_IMAGE_NO_UPLOAD_RE = re.compile(
+    r"^Local image found but Wix upload is not configured: '(.+)'\. "
+    r"Set a Wix site ID and API key to migrate local files automatically\.$"
+)
+_IMAGE_UPLOAD_FAILED_RE = re.compile(r"^Failed to upload image '(.+)' to Wix: (.+)$")
+_EXACT_MESSAGE_TRANSLATIONS = {
+    "fieldType must be PRODUCT for product rows.": "Der Feldtyp muss für Produktzeilen PRODUCT sein.",
+    "name is required.": "Der Produktname fehlt.",
+    "name exceeds 80 characters.": "Der Produktname ist länger als 80 Zeichen.",
+    "Product name exceeded 80 characters and was truncated.": "Der Produktname war länger als 80 Zeichen und wurde gekürzt.",
+    "visible must be TRUE or FALSE.": "Sichtbarkeit muss TRUE oder FALSE sein.",
+    "price is required.": "Der Verkaufspreis fehlt.",
+    "price must be numeric.": "Der Verkaufspreis muss numerisch sein.",
+    "inventory is required.": "Der Bestand fehlt.",
+    "inventory must be IN_STOCK, OUT_OF_STOCK, or an integer.": "Bestand muss IN_STOCK, OUT_OF_STOCK oder eine ganze Zahl sein.",
+    "cost must be numeric with <=9 whole digits and <=2 decimals.": "Einstand muss numerisch sein (max. 9 Vorkomma- und 2 Nachkommastellen).",
+    "sku exceeds 40 characters.": "Die SKU ist länger als 40 Zeichen.",
+    "brand exceeds 50 characters.": "Die Marke ist länger als 50 Zeichen.",
+}
 
 
 def _severity_de(severity: Severity) -> str:
@@ -24,30 +48,9 @@ def _message_de(issue: ValidationIssue) -> str:
     """Translate known issue messages from English to German for reports."""
     message = issue.message
 
-    if message == "fieldType must be PRODUCT for alpha conversion mode.":
-        return "Der Feldtyp muss PRODUCT sein (Alpha-Modus)."
-    if message == "name is required.":
-        return "Der Produktname fehlt."
-    if message == "name exceeds 80 characters.":
-        return "Der Produktname ist länger als 80 Zeichen."
-    if message == "Product name exceeded 80 characters and was truncated.":
-        return "Der Produktname war länger als 80 Zeichen und wurde gekürzt."
-    if message == "visible must be TRUE or FALSE.":
-        return "Sichtbarkeit muss TRUE oder FALSE sein."
-    if message == "price is required.":
-        return "Der Verkaufspreis fehlt."
-    if message == "price must be numeric.":
-        return "Der Verkaufspreis muss numerisch sein."
-    if message == "inventory is required.":
-        return "Der Bestand fehlt."
-    if message == "inventory must be IN_STOCK, OUT_OF_STOCK, or an integer.":
-        return "Bestand muss IN_STOCK, OUT_OF_STOCK oder eine ganze Zahl sein."
-    if message == "cost must be numeric with <=9 whole digits and <=2 decimals.":
-        return "Einstand muss numerisch sein (max. 9 Vorkomma- und 2 Nachkommastellen)."
-    if message == "sku exceeds 40 characters.":
-        return "Die SKU ist länger als 40 Zeichen."
-    if message == "brand exceeds 50 characters.":
-        return "Die Marke ist länger als 50 Zeichen."
+    translated = _EXACT_MESSAGE_TRANSLATIONS.get(message)
+    if translated is not None:
+        return translated
 
     match = _DUP_HANDLE_RE.match(message)
     if match:
@@ -57,6 +60,18 @@ def _message_de(issue: ValidationIssue) -> str:
     if match:
         return f"Doppelte SKU erkannt: '{match.group(1)}'."
 
+    match = _UNMERGED_IDENTITY_RE.match(message)
+    if match:
+        reason = match.group(3)
+        reason = reason.replace("conflicting fields:", "abweichende Felder:")
+        reason = reason.replace("invalid merge values:", "ungültige Merge-Werte:")
+        reason = reason.replace("row ", "Zeile ")
+        reason = reason.replace("merge requirements were not met", "die Merge-Bedingungen nicht erfüllt wurden")
+        return (
+            f"Produktidentität '{match.group(1)}' wurde über Quellzeilen {match.group(2)} "
+            f"nicht zusammengeführt: {reason}."
+        )
+
     match = _INVALID_DECIMAL_RE.match(message)
     if match:
         return f"Ungültiger Dezimalwert: {match.group(1)}"
@@ -64,6 +79,25 @@ def _message_de(issue: ValidationIssue) -> str:
     match = _INVALID_QTY_RE.match(message)
     if match:
         return f"Ungültiger Mengenwert: {match.group(1)}"
+
+    match = _IMAGE_REF_RE.match(message)
+    if match:
+        return f"Bildreferenz konnte nicht aufgelöst werden: '{match.group(1)}'."
+
+    match = _UNSUPPORTED_IMAGE_RE.match(message)
+    if match:
+        return f"Nicht unterstützter Bildtyp: '{match.group(1)}'."
+
+    match = _LOCAL_IMAGE_NO_UPLOAD_RE.match(message)
+    if match:
+        return (
+            f"Lokales Bild gefunden, aber der Wix-Upload ist nicht konfiguriert: "
+            f"'{match.group(1)}'."
+        )
+
+    match = _IMAGE_UPLOAD_FAILED_RE.match(message)
+    if match:
+        return f"Bild-Upload nach Wix fehlgeschlagen ({match.group(1)}): {match.group(2)}"
 
     return message
 

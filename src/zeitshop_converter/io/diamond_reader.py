@@ -13,6 +13,7 @@ import zipfile
 from ..core.models import DiamondRecord
 from ..core.normalize import normalize_text
 from .detect import detect_encoding, sniff_dialect
+from .xlsx_images import extract_xlsx_row_images
 
 try:
     from openpyxl import load_workbook
@@ -25,6 +26,7 @@ _CELL_REF_RE = re.compile(r"([A-Za-z]+)")
 
 
 CANONICAL_COLUMNS = [
+    "Bild",
     "Filiale",
     "Kategorie",
     "Warengruppe",
@@ -40,6 +42,7 @@ CANONICAL_COLUMNS = [
 
 
 ALIASES: dict[str, str] = {
+    "bild": "Bild",
     "filiale": "Filiale",
     "kategorie": "Kategorie",
     "warengruppe": "Warengruppe",
@@ -87,11 +90,7 @@ def _cell_to_text(value: object) -> str:
 
 def _header_indexes(raw_header: Sequence[object]) -> tuple[list[int], list[str]]:
     cleaned_header = [_canonical_header(_cell_to_text(value)) for value in raw_header]
-    keep_indexes = [
-        index
-        for index, header in enumerate(cleaned_header)
-        if header and header.casefold() != "bild"
-    ]
+    keep_indexes = [index for index, header in enumerate(cleaned_header) if header]
     final_header = [cleaned_header[index] for index in keep_indexes]
     return keep_indexes, final_header
 
@@ -104,6 +103,32 @@ def _canonicalize_row(row: Mapping[str, object]) -> dict[str, str]:
         if canonical_key in canonical:
             canonical[canonical_key] = _cell_to_text(value)
     return canonical
+
+
+def _merge_bild_values(existing: str, image_paths: Sequence[Path]) -> str:
+    values: list[str] = []
+    seen: set[str] = set()
+
+    if normalize_text(existing):
+        for part in normalize_text(existing).replace("|", ";").split(";"):
+            item = normalize_text(part)
+            if not item:
+                continue
+            key = item.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            values.append(item)
+
+    for image_path in image_paths:
+        item = str(image_path.resolve())
+        key = item.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        values.append(item)
+
+    return "; ".join(values)
 
 
 def _has_product_identity(canonical_row: Mapping[str, str]) -> bool:
@@ -346,7 +371,12 @@ def _find_header_row(rows: Sequence[Sequence[object]]) -> tuple[int, list[int], 
     return best_row, best_keep_indexes, best_final_header
 
 
-def read_diamond_xlsx(path: str | Path) -> list[DiamondRecord]:
+def read_diamond_xlsx(
+    path: str | Path,
+    *,
+    extract_embedded_images: bool = False,
+    image_export_dir: str | Path | None = None,
+) -> list[DiamondRecord]:
     """Read a DIAMOND XLSX file into canonical `DiamondRecord` objects."""
     file_path = Path(path)
     if load_workbook is None:
@@ -381,17 +411,55 @@ def read_diamond_xlsx(path: str | Path) -> list[DiamondRecord]:
 
         records.append(DiamondRecord(source_row=source_row, data=canonical))
 
-    return records
+    if not extract_embedded_images or not records:
+        return records
+
+    with zipfile.ZipFile(file_path) as archive:
+        sheet_path = _load_first_sheet_path(archive)
+
+    row_images = extract_xlsx_row_images(
+        file_path,
+        sheet_path=sheet_path,
+        header_row=header_row,
+        keep_indexes=keep_indexes,
+        final_header=final_header,
+        source_rows=[record.source_row for record in records],
+        output_dir=image_export_dir,
+    )
+    if not row_images:
+        return records
+
+    merged_records: list[DiamondRecord] = []
+    for record in records:
+        image_paths = row_images.get(record.source_row, [])
+        if not image_paths:
+            merged_records.append(record)
+            continue
+
+        merged_data = dict(record.data)
+        merged_data["Bild"] = _merge_bild_values(merged_data.get("Bild", ""), image_paths)
+        merged_records.append(DiamondRecord(source_row=record.source_row, data=merged_data))
+
+    return merged_records
 
 
-def read_diamond_file(path: str | Path) -> list[DiamondRecord]:
+def read_diamond_file(
+    path: str | Path,
+    *,
+    extract_embedded_images: bool = False,
+    image_export_dir: str | Path | None = None,
+) -> list[DiamondRecord]:
     """Read DIAMOND exports from CSV or XLSX."""
     file_path = Path(path)
     suffix = file_path.suffix.casefold()
     if suffix == ".csv":
         return read_diamond_csv(file_path)
     if suffix == ".xlsx":
-        return read_diamond_xlsx(file_path)
+        return read_diamond_xlsx(
+            file_path,
+            extract_embedded_images=extract_embedded_images,
+            image_export_dir=image_export_dir,
+        )
 
     raise ValueError(
         f"Unsupported DIAMOND format '{file_path.suffix}'. "

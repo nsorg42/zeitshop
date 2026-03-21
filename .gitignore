@@ -5,10 +5,10 @@ __pycache__/
 
 # Virtual environments
 .venv/
+.venv-windows-build/
 venv/
 env/
 ENV/
-
 
 # Test and tool caches
 .pytest_cache/
@@ -17,9 +17,6 @@ ENV/
 .hypothesis/
 .tox/
 .nox/
-*.csv
-*.mdc
-testing_data/
 
 # Coverage reports
 .coverage
@@ -48,9 +45,10 @@ pip-wheel-metadata/
 .DS_Store
 Thumbs.db
 
-# Generated converter outputs
+# Local sample data and generated outputs
+env.txt
+Wix_Templates_Products_Without_Categories_CSV.csv
 out/
-
-*.csv
 *.mdc
+export/
 testing_data/

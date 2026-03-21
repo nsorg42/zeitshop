@@ -1,4 +1,8 @@
-from zeitshop_converter.core import ConversionOptions, DiamondRecord, convert_records
+from collections import Counter
+
+import pytest
+
+from zeitshop_converter.core import ConversionOptions, DiamondRecord, Severity, convert_records
 
 
 def _template_header() -> list[str]:
@@ -30,8 +34,8 @@ def test_pipeline_maps_valid_and_invalid_rows() -> None:
                 "Verkauf": "99",
                 "Einstand": "40.50",
                 "Menge": "3",
-                "Warengruppe": "Uhr",
-                "Kategorie": "Herrenuhr",
+                "Warengruppe": "Category-A",
+                "Kategorie": "Group-A",
             },
         ),
         DiamondRecord(
@@ -60,12 +64,14 @@ def test_pipeline_maps_valid_and_invalid_rows() -> None:
     assert valid["inventory"] == "3"
 
 
-def test_pipeline_merges_duplicate_article_numbers() -> None:
+def test_pipeline_merges_duplicate_article_numbers_when_only_branch_and_quantity_differ() -> None:
     records = [
         DiamondRecord(
             source_row=2,
             data={
                 "Artikel Nr": "DUP-1",
+                "Referenz": "REF-1",
+                "Filiale": "Store-North",
                 "Marke": "Brand",
                 "Produktlinie": "Line",
                 "Kurzbeschreibung": "One",
@@ -78,11 +84,13 @@ def test_pipeline_merges_duplicate_article_numbers() -> None:
             source_row=3,
             data={
                 "Artikel Nr": "DUP-1",
+                "Referenz": "REF-1",
+                "Filiale": "Store-South",
                 "Marke": "Brand",
                 "Produktlinie": "Line",
-                "Kurzbeschreibung": "Two",
-                "Verkauf": "11",
-                "Einstand": "5.5",
+                "Kurzbeschreibung": "One",
+                "Verkauf": "10",
+                "Einstand": "5",
                 "Menge": "2",
             },
         ),
@@ -90,9 +98,11 @@ def test_pipeline_merges_duplicate_article_numbers() -> None:
 
     batch = convert_records(records, _template_header(), ConversionOptions())
     assert len(batch.results) == 1
-    row = batch.results[0].wix_row
+    result = batch.results[0]
+    row = result.wix_row
     assert row["sku"] == "DUP-1"
     assert row["inventory"] == "3"
+    assert not any(issue.field == "merge" for issue in result.issues)
 
 
 def test_pipeline_builds_non_duplicated_names() -> None:
@@ -101,9 +111,9 @@ def test_pipeline_builds_non_duplicated_names() -> None:
             source_row=2,
             data={
                 "Artikel Nr": "1",
-                "Marke": "Maurice Lacroix",
-                "Produktlinie": "Pontos",
-                "Kurzbeschreibung": "Pontos",
+                "Marke": "Atlas Forge",
+                "Produktlinie": "Northline",
+                "Kurzbeschreibung": "Northline",
                 "Verkauf": "100",
                 "Einstand": "50",
                 "Menge": "1",
@@ -113,9 +123,9 @@ def test_pipeline_builds_non_duplicated_names() -> None:
             source_row=3,
             data={
                 "Artikel Nr": "2",
-                "Marke": "Maurice Lacroix",
-                "Produktlinie": "Aikon",
-                "Kurzbeschreibung": "Maurice Lacroix Aikon",
+                "Marke": "Atlas Forge",
+                "Produktlinie": "Skyframe",
+                "Kurzbeschreibung": "Atlas Forge Skyframe",
                 "Verkauf": "100",
                 "Einstand": "50",
                 "Menge": "1",
@@ -125,9 +135,9 @@ def test_pipeline_builds_non_duplicated_names() -> None:
             source_row=4,
             data={
                 "Artikel Nr": "3",
-                "Marke": "Maurice Lacroix",
-                "Produktlinie": "1975",
-                "Kurzbeschreibung": "1975 Chrono",
+                "Marke": "Atlas Forge",
+                "Produktlinie": "Series 77",
+                "Kurzbeschreibung": "77 Chrono",
                 "Verkauf": "100",
                 "Einstand": "50",
                 "Menge": "1",
@@ -137,9 +147,9 @@ def test_pipeline_builds_non_duplicated_names() -> None:
             source_row=5,
             data={
                 "Artikel Nr": "4",
-                "Marke": "Thomas Sabo",
-                "Produktlinie": "Charm Club",
-                "Kurzbeschreibung": "Charm Kreuz",
+                "Marke": "Copper Lane",
+                "Produktlinie": "Token Club",
+                "Kurzbeschreibung": "Token Cross",
                 "Verkauf": "100",
                 "Einstand": "50",
                 "Menge": "1",
@@ -149,9 +159,9 @@ def test_pipeline_builds_non_duplicated_names() -> None:
             source_row=6,
             data={
                 "Artikel Nr": "5",
-                "Marke": "Thomas Sabo",
-                "Produktlinie": "Charm Club",
-                "Kurzbeschreibung": "Charms Buchstaben W",
+                "Marke": "Copper Lane",
+                "Produktlinie": "Token Club",
+                "Kurzbeschreibung": "Tokens Letter W",
                 "Verkauf": "100",
                 "Einstand": "50",
                 "Menge": "1",
@@ -162,11 +172,11 @@ def test_pipeline_builds_non_duplicated_names() -> None:
     batch = convert_records(records, _template_header(), ConversionOptions())
     names = [result.wix_row["name"] for result in batch.results]
     assert names == [
-        "Maurice Lacroix Pontos",
-        "Maurice Lacroix Aikon",
-        "Maurice Lacroix 1975 Chrono",
-        "Thomas Sabo Charm Club Kreuz",
-        "Thomas Sabo Charm Club Buchstaben W",
+        "Atlas Forge Northline",
+        "Atlas Forge Skyframe",
+        "Atlas Forge Series 77 Chrono",
+        "Copper Lane Token Club Cross",
+        "Copper Lane Token Club Letter W",
     ]
 
 
@@ -176,10 +186,10 @@ def test_pipeline_keeps_customer_facing_name_and_stores_reference_in_barcode() -
             source_row=10,
             data={
                 "Artikel Nr": "A1",
-                "Referenz": "AI1106-SS002-350-1",
-                "Marke": "Maurice Lacroix",
-                "Produktlinie": "Aikon",
-                "Kurzbeschreibung": "Maurice Lacroix Aikon",
+                "Referenz": "ZX-1001-ALPHA",
+                "Marke": "Atlas Forge",
+                "Produktlinie": "Skyframe",
+                "Kurzbeschreibung": "Atlas Forge Skyframe",
                 "Verkauf": "1100",
                 "Einstand": "495",
                 "Menge": "1",
@@ -189,10 +199,10 @@ def test_pipeline_keeps_customer_facing_name_and_stores_reference_in_barcode() -
             source_row=11,
             data={
                 "Artikel Nr": "A2",
-                "Referenz": "AI1108-PVP02-130-1",
-                "Marke": "Maurice Lacroix",
-                "Produktlinie": "Aikon",
-                "Kurzbeschreibung": "Maurice Lacroix Aikon",
+                "Referenz": "ZX-1002-BRAVO",
+                "Marke": "Atlas Forge",
+                "Produktlinie": "Skyframe",
+                "Kurzbeschreibung": "Atlas Forge Skyframe",
                 "Verkauf": "1100",
                 "Einstand": "550",
                 "Menge": "2",
@@ -203,13 +213,53 @@ def test_pipeline_keeps_customer_facing_name_and_stores_reference_in_barcode() -
     batch = convert_records(records, _template_header(), ConversionOptions())
     assert len(batch.results) == 2
     names = [r.wix_row["name"] for r in batch.results]
-    assert names[0] == "Maurice Lacroix Aikon"
-    assert names[1] == "Maurice Lacroix Aikon"
-    assert batch.results[0].wix_row["barcode"] == "AI1106-SS002-350-1"
-    assert batch.results[1].wix_row["barcode"] == "AI1108-PVP02-130-1"
+    assert names[0] == "Atlas Forge Skyframe"
+    assert names[1] == "Atlas Forge Skyframe"
+    assert batch.results[0].wix_row["barcode"] == "ZX-1001-ALPHA"
+    assert batch.results[1].wix_row["barcode"] == "ZX-1002-BRAVO"
 
 
-def test_pipeline_merges_same_article_even_with_different_reference() -> None:
+def test_pipeline_rewrites_duplicate_barcodes_to_unique_values() -> None:
+    records = [
+        DiamondRecord(
+            source_row=12,
+            data={
+                "Artikel Nr": "SKU-1",
+                "Referenz": "BAR-1",
+                "Marke": "Atlas Forge",
+                "Produktlinie": "Skyframe",
+                "Kurzbeschreibung": "One",
+                "Verkauf": "100",
+                "Einstand": "50",
+                "Menge": "1",
+            },
+        ),
+        DiamondRecord(
+            source_row=13,
+            data={
+                "Artikel Nr": "SKU-2",
+                "Referenz": "BAR-1",
+                "Marke": "Atlas Forge",
+                "Produktlinie": "Skyframe",
+                "Kurzbeschreibung": "Two",
+                "Verkauf": "120",
+                "Einstand": "60",
+                "Menge": "1",
+            },
+        ),
+    ]
+
+    batch = convert_records(records, _template_header(), ConversionOptions())
+
+    assert len(batch.results) == 2
+    assert batch.error_count == 0
+    assert batch.warning_count == 0
+    assert len(batch.valid_product_rows) == 2
+    assert batch.results[0].wix_row["barcode"] == "SKU-1"
+    assert batch.results[1].wix_row["barcode"] == "SKU-2"
+
+
+def test_pipeline_does_not_merge_same_article_when_reference_differs() -> None:
     records = [
         DiamondRecord(
             source_row=20,
@@ -240,7 +290,182 @@ def test_pipeline_merges_same_article_even_with_different_reference() -> None:
     ]
 
     batch = convert_records(records, _template_header(), ConversionOptions())
+    assert len(batch.results) == 2
+    assert batch.error_count == 0
+    assert batch.warning_count == 2
+    assert [result.wix_row["inventory"] for result in batch.results] == ["1", "2"]
+
+    for result in batch.results:
+        warning = next(issue for issue in result.issues if issue.field == "merge")
+        assert warning.severity == Severity.WARNING
+        assert "Duplicate identity 'ART-1'" in warning.message
+        assert "Referenz" in warning.message
+
+    assert any(issue.field == "sku" for issue in batch.results[1].issues)
+
+
+@pytest.mark.parametrize(
+    ("field", "left", "right"),
+    [
+        ("Kurzbeschreibung", "Model A", "Model B"),
+        ("Einstand", "50", "51.00"),
+        ("Verkauf", "100", "101.00"),
+    ],
+)
+def test_pipeline_does_not_merge_duplicates_that_disagree_on_critical_fields(
+    field: str,
+    left: str,
+    right: str,
+) -> None:
+    first = {
+        "Artikel Nr": "WARN-1",
+        "Referenz": "REF-1",
+        "Marke": "Brand",
+        "Produktlinie": "Line",
+        "Kurzbeschreibung": "Model A",
+        "Verkauf": "100",
+        "Einstand": "50",
+        "Menge": "1",
+    }
+    second = dict(first)
+    second["Menge"] = "2"
+    first[field] = left
+    second[field] = right
+
+    batch = convert_records(
+        [
+            DiamondRecord(source_row=30, data=first),
+            DiamondRecord(source_row=31, data=second),
+        ],
+        _template_header(),
+        ConversionOptions(),
+    )
+
+    assert len(batch.results) == 2
+    assert batch.error_count == 0
+    assert batch.warning_count == 2
+    assert [result.wix_row["inventory"] for result in batch.results] == ["1", "2"]
+
+    for result in batch.results:
+        warning = next(issue for issue in result.issues if issue.field == "merge")
+        assert warning.severity == Severity.WARNING
+        assert "source rows 30, 31" in warning.message
+        assert field in warning.message
+
+    assert [result.wix_row["barcode"] for result in batch.results] == ["WARN-1", "ds-warn-1-2"]
+
+
+def test_pipeline_does_not_warn_for_equivalent_decimal_formats_in_merged_rows() -> None:
+    records = [
+        DiamondRecord(
+            source_row=40,
+            data={
+                "Artikel Nr": "DEC-1",
+                "Referenz": "REF-DEC",
+                "Marke": "Brand",
+                "Produktlinie": "Line",
+                "Kurzbeschreibung": "Model",
+                "Verkauf": "100",
+                "Einstand": "50",
+                "Menge": "1",
+            },
+        ),
+        DiamondRecord(
+            source_row=41,
+            data={
+                "Artikel Nr": "DEC-1",
+                "Referenz": "REF-DEC",
+                "Marke": "Brand",
+                "Produktlinie": "Line",
+                "Kurzbeschreibung": "Model",
+                "Verkauf": "100.00",
+                "Einstand": "50.00",
+                "Menge": "2",
+            },
+        ),
+    ]
+
+    batch = convert_records(records, _template_header(), ConversionOptions())
+
     assert len(batch.results) == 1
-    row = batch.results[0].wix_row
-    assert row["sku"] == "ART-1"
-    assert row["inventory"] == "3"
+    result = batch.results[0]
+    assert result.wix_row["inventory"] == "3"
+    assert not any(issue.field == "merge" for issue in result.issues)
+
+
+def test_pipeline_does_not_merge_duplicate_rows_when_quantity_is_invalid() -> None:
+    records = [
+        DiamondRecord(
+            source_row=45,
+            data={
+                "Artikel Nr": "QTY-1",
+                "Referenz": "REF-QTY",
+                "Filiale": "Store-North",
+                "Marke": "Brand",
+                "Produktlinie": "Line",
+                "Kurzbeschreibung": "Model",
+                "Verkauf": "100",
+                "Einstand": "50",
+                "Menge": "abc",
+            },
+        ),
+        DiamondRecord(
+            source_row=46,
+            data={
+                "Artikel Nr": "QTY-1",
+                "Referenz": "REF-QTY",
+                "Filiale": "Store-South",
+                "Marke": "Brand",
+                "Produktlinie": "Line",
+                "Kurzbeschreibung": "Model",
+                "Verkauf": "100",
+                "Einstand": "50",
+                "Menge": "2",
+            },
+        ),
+    ]
+
+    batch = convert_records(records, _template_header(), ConversionOptions())
+
+    assert len(batch.results) == 2
+    assert batch.error_count == 1
+    assert batch.warning_count == 2
+
+    invalid_result = batch.results[0]
+    second_result = batch.results[1]
+
+    invalid_warning = next(issue for issue in invalid_result.issues if issue.field == "merge")
+    assert "invalid merge values" in invalid_warning.message
+    assert "row 45 (Menge)" in invalid_warning.message
+    assert any(
+        issue.field == "inventory" and issue.severity == Severity.ERROR
+        for issue in invalid_result.issues
+    )
+
+    second_warning = next(issue for issue in second_result.issues if issue.field == "merge")
+    assert "invalid merge values" in second_warning.message
+    assert second_result.wix_row["inventory"] == "2"
+    assert invalid_result.wix_row["barcode"] == "QTY-1"
+    assert second_result.wix_row["barcode"] == "ds-qty-1-2"
+
+
+def test_pipeline_reports_invalid_numeric_fields_once() -> None:
+    records = [
+        DiamondRecord(
+            source_row=50,
+            data={
+                "Artikel Nr": "BAD-1",
+                "Marke": "Brand",
+                "Produktlinie": "Line",
+                "Kurzbeschreibung": "Broken",
+                "Verkauf": "abc",
+                "Einstand": "def",
+                "Menge": "1.5",
+            },
+        ),
+    ]
+
+    batch = convert_records(records, _template_header(), ConversionOptions())
+    issue_counts = Counter(issue.field for issue in batch.results[0].issues)
+
+    assert issue_counts == Counter({"price": 1, "cost": 1, "inventory": 1})

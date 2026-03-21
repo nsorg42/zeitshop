@@ -6,12 +6,7 @@ from typing import Callable
 
 
 def _load_charset_normalizer() -> Callable[[bytes], object] | None:
-    """Load charset-normalizer lazily so static analyzers stay quiet.
-
-    Pylance can flag optional imports as missing when VS Code uses a different
-    interpreter than the project's virtual environment. A runtime import keeps
-    fallback behavior and avoids false-positive import warnings in the module.
-    """
+    """Load charset-normalizer lazily while keeping the dependency optional."""
     try:
         module = importlib.import_module("charset_normalizer")
     except ImportError:  # pragma: no cover - dependency is declared in pyproject

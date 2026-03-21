@@ -25,3 +25,20 @@ def test_template_requires_mandatory_columns(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="missing required columns"):
         load_template_header(template)
+
+
+def test_load_template_header_strips_bom_and_whitespace(tmp_path: Path) -> None:
+    template = tmp_path / "template.csv"
+    template.write_text("\ufeffhandle, name , fieldType , visible , price , inventory , sku \n", encoding="utf-8")
+
+    header = load_template_header(template)
+
+    assert header == ["handle", "name", "fieldType", "visible", "price", "inventory", "sku"]
+
+
+def test_load_template_header_rejects_empty_template(tmp_path: Path) -> None:
+    template = tmp_path / "template.csv"
+    template.write_text("", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Template CSV is empty"):
+        load_template_header(template)

@@ -52,7 +52,7 @@ def validate_wix_row(row: Mapping[str, str], source_row: int) -> list[Validation
                 source_row=source_row,
                 field="fieldType",
                 severity=Severity.ERROR,
-                message="fieldType must be PRODUCT for alpha conversion mode.",
+                message="fieldType must be PRODUCT for product rows.",
             )
         )
 

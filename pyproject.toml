@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "zeitshop-converter"
 version = "0.1.0"
-description = "Primitive DIAMOND CSV to Wix CSV converter skeleton"
+description = "Local DIAMOND export to Wix import converter with optional image migration"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -16,7 +16,6 @@ dependencies = [
 [project.optional-dependencies]
 gui = [
   "sv-ttk",
-  "tksheet>=7.0.0",
 ]
 windows-build = [
   "pyinstaller>=6.0.0",
@@ -36,3 +35,4 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+testpaths = ["tests"]
