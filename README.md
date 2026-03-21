@@ -169,7 +169,7 @@ Run the test suite:
 pytest -q
 ```
 
-GitHub Actions now also runs `.github/workflows/ci.yml` automatically on every push and pull request. That workflow installs the project with development dependencies and runs `pytest`, so GitHub will show whether the branch is green before you merge it.
+GitHub Actions now also runs `.github/workflows/ci.yml` automatically on every push and pull request. That workflow installs the project with development dependencies and runs `pytest`.
 
 Project layout:
 
@@ -185,4 +185,3 @@ src/zeitshop_converter/
 
 - The built-in Wix template header is used unless you explicitly pass a custom template.
 - Image uploads require network access. Conversion without Wix uploads is fully local.
-- Embedded image extraction works with the first worksheet in the workbook, which matches the converter's main import workflow.
