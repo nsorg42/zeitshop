@@ -5,7 +5,7 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-from zeitshop_converter.core import ConversionBatch, ImageMigrationOptions, Severity, ValidationIssue, WixRowResult
+from zeitshop_converter.core import ConversionBatch, ImageArchiveOptions, Severity, ValidationIssue, WixRowResult
 from zeitshop_converter.gui import app as gui_app
 
 
@@ -87,10 +87,8 @@ def test_save_and_load_settings_round_trip_with_normalization(
             handle_prefix="custom-",
             default_visible=False,
             output_dir="/tmp/out",
-            image_migration_enabled=True,
-            image_directory="/tmp/images",
-            export_embedded_images=True,
-            export_directory="/tmp/exported",
+            image_archive_enabled=True,
+            image_manifest="/tmp/manifest.csv",
             wix_site_id="site-1",
             wix_api_key="secret",
             wix_image_path="/media/path",
@@ -100,16 +98,14 @@ def test_save_and_load_settings_round_trip_with_normalization(
     loaded = gui_app._load_settings()
 
     assert loaded == gui_app.GuiSettings(
-        handle_prefix="custom-",
-        default_visible=False,
-        output_dir="/tmp/out",
-        image_migration_enabled=True,
-        image_directory="/tmp/images",
-        export_embedded_images=True,
-        export_directory="/tmp/exported",
-        wix_site_id="site-1",
-        wix_api_key="secret",
-        wix_image_path="/media/path",
+            handle_prefix="custom-",
+            default_visible=False,
+            output_dir="/tmp/out",
+            image_archive_enabled=True,
+            image_manifest="/tmp/manifest.csv",
+            wix_site_id="site-1",
+            wix_api_key="secret",
+            wix_image_path="/media/path",
     )
 
     settings_path.write_text(
@@ -126,10 +122,8 @@ def test_build_options_uses_environment_credentials(monkeypatch: pytest.MonkeyPa
         settings=gui_app.GuiSettings(
             handle_prefix="hp-",
             default_visible=False,
-            image_migration_enabled=True,
-            image_directory="/images",
-            export_embedded_images=True,
-            export_directory="/exports",
+            image_archive_enabled=True,
+            image_manifest="/manifest.csv",
             wix_site_id="",
             wix_api_key="stored-key",
             wix_image_path="/target",
@@ -142,11 +136,9 @@ def test_build_options_uses_environment_credentials(monkeypatch: pytest.MonkeyPa
 
     assert options.default_visible is False
     assert options.handle_prefix == "hp-"
-    assert options.image_migration == ImageMigrationOptions(
+    assert options.image_archive == ImageArchiveOptions(
         enabled=True,
-        image_directory="",
-        export_embedded_images=True,
-        export_directory="/exports",
+        manifest_path="/manifest.csv",
         wix_site_id="env-site",
         wix_api_key="stored-key",
         wix_file_path="/target",
@@ -396,11 +388,12 @@ def test_run_conversion_blocks_offline_wix_uploads_before_worker(monkeypatch: py
     )
 
     fake_app = SimpleNamespace(
-        diamond_path=Path("/tmp/input.xlsx"),
+        diamond_path=Path("/tmp/input.csv"),
         _conversion_running=False,
         _build_options=lambda: gui_app.ConversionOptions(
-            image_migration=gui_app.ImageMigrationOptions(
+            image_archive=gui_app.ImageArchiveOptions(
                 enabled=True,
+                manifest_path="/manifest.csv",
                 wix_site_id="site-1",
                 wix_api_key="api-1",
             )

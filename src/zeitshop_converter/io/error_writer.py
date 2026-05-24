@@ -21,6 +21,9 @@ _LOCAL_IMAGE_NO_UPLOAD_RE = re.compile(
     r"Set a Wix site ID and API key to migrate local files automatically\.$"
 )
 _IMAGE_UPLOAD_FAILED_RE = re.compile(r"^Failed to upload image '(.+)' to Wix: (.+)$")
+_ARCHIVE_AMBIGUOUS_RE = re.compile(r"^Archived image match is ambiguous across ArticleIds: (.+)\.$")
+_ARCHIVE_NO_FILES_RE = re.compile(r"^Archived image match '(.+)' has no image files\.$")
+_ARCHIVE_UPLOAD_FAILED_RE = re.compile(r"^Failed to upload archived image '(.+)' to Wix: (.+)$")
 _EXACT_MESSAGE_TRANSLATIONS = {
     "fieldType must be PRODUCT for product rows.": "Der Feldtyp muss für Produktzeilen PRODUCT sein.",
     "name is required.": "Der Produktname fehlt.",
@@ -34,6 +37,10 @@ _EXACT_MESSAGE_TRANSLATIONS = {
     "cost must be numeric with <=9 whole digits and <=2 decimals.": "Einstand muss numerisch sein (max. 9 Vorkomma- und 2 Nachkommastellen).",
     "sku exceeds 40 characters.": "Die SKU ist länger als 40 Zeichen.",
     "brand exceeds 50 characters.": "Die Marke ist länger als 50 Zeichen.",
+    "No archived image matched this product.": "Kein archiviertes DiamondSEVEN-Bild passt zu diesem Produkt.",
+    "Archived image found but Wix upload is not configured.": (
+        "Archiviertes Bild gefunden, aber der Wix-Upload ist nicht konfiguriert."
+    ),
 }
 
 
@@ -98,6 +105,18 @@ def _message_de(issue: ValidationIssue) -> str:
     match = _IMAGE_UPLOAD_FAILED_RE.match(message)
     if match:
         return f"Bild-Upload nach Wix fehlgeschlagen ({match.group(1)}): {match.group(2)}"
+
+    match = _ARCHIVE_AMBIGUOUS_RE.match(message)
+    if match:
+        return f"Archiviertes Bild ist nicht eindeutig zuordenbar. ArticleIds: {match.group(1)}."
+
+    match = _ARCHIVE_NO_FILES_RE.match(message)
+    if match:
+        return f"Archivierter Bildtreffer '{match.group(1)}' enthält keine Bilddateien."
+
+    match = _ARCHIVE_UPLOAD_FAILED_RE.match(message)
+    if match:
+        return f"Archivierter Bild-Upload nach Wix fehlgeschlagen ({match.group(1)}): {match.group(2)}"
 
     return message
 

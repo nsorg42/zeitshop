@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from zeitshop_converter.core import ConversionBatch, Severity, ValidationIssue, WixRowResult
+from zeitshop_converter.io.image_archive import ArchiveReport
 from zeitshop_converter.main import _build_parser, _run_convert
 from zeitshop_converter import main as main_module
 
@@ -45,9 +46,7 @@ def test_build_parser_sets_expected_defaults() -> None:
     assert args.inventory_mode == "numeric"
     assert args.handle_prefix == "ds-"
     assert args.wix_image_path == "/zeitshop"
-    assert args.export_embedded_images is False
-    assert args.image_export_dir is None
-    assert args.images_dir is None
+    assert args.image_manifest is None
     assert args.issues_output is None
 
 
@@ -104,20 +103,18 @@ def test_run_convert_uses_environment_image_credentials(monkeypatch: pytest.Monk
             "out.csv",
             "--issues-output",
             "issues.csv",
-            "--images-dir",
-            "images",
+            "--image-manifest",
+            "manifest.csv",
         ]
     )
 
     assert _run_convert(args) == 0
     assert captured["progress_callback"] is print
     options = captured["options"]
-    assert options.image_migration.enabled is True
-    assert options.image_migration.image_directory == "images"
-    assert options.image_migration.export_embedded_images is False
-    assert options.image_migration.export_directory == ""
-    assert options.image_migration.wix_site_id == "env-site"
-    assert options.image_migration.wix_api_key == "env-key"
+    assert options.image_archive.enabled is True
+    assert options.image_archive.manifest_path == "manifest.csv"
+    assert options.image_archive.wix_site_id == "env-site"
+    assert options.image_archive.wix_api_key == "env-key"
     assert written["wix"] == ("out.csv", ["handle"], [{"handle": "one"}])
     assert written["issues"] == ("issues.csv", [])
     assert "Valid products: 1" in capsys.readouterr().out
@@ -146,3 +143,42 @@ def test_run_convert_skips_issue_writer_without_issues_output(monkeypatch: pytes
 
     args = _build_parser().parse_args(["convert", "--diamond", "input.csv", "--output", "out.csv"])
     assert _run_convert(args) == 0
+
+
+def test_main_dispatches_archive_and_diagnose_subcommands(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(main_module, "_run_archive_images", lambda args: 5)
+    monkeypatch.setattr(main_module, "_run_diagnose_image_matches", lambda args: 6)
+
+    assert main_module.main(["archive-images", "--output-dir", "images", "--manifest", "manifest.csv"]) == 5
+    assert main_module.main(["diagnose-image-matches", "--diamond", "input.csv", "--manifest", "manifest.csv"]) == 6
+
+
+def test_run_archive_images_passes_tls_options(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_archive_diamondseven_images(**kwargs):
+        captured.update(kwargs)
+        return ArchiveReport()
+
+    monkeypatch.setattr(main_module, "archive_diamondseven_images", fake_archive_diamondseven_images)
+    args = _build_parser().parse_args(
+        [
+            "archive-images",
+            "--output-dir",
+            "images",
+            "--manifest",
+            "manifest.csv",
+            "--base-url",
+            "https://diamond",
+            "--partner-key",
+            "key",
+            "--ca-bundle",
+            "ca.pem",
+            "--insecure-skip-tls-verify",
+        ]
+    )
+
+    assert main_module._run_archive_images(args) == 0
+    assert captured["ca_bundle"] == "ca.pem"
+    assert captured["insecure_skip_tls_verify"] is True
+    assert captured["document_type"] == "auto"

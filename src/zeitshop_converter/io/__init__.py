@@ -4,13 +4,18 @@ from .diamond_reader import (
     CANONICAL_COLUMNS,
     read_diamond_csv,
     read_diamond_file,
-    read_diamond_xlsx,
 )
 from .error_writer import write_error_csv, write_issue_csv
-from .media_migration import (
+from .image_archive import (
+    MANIFEST_COLUMNS,
     WixUploadConnectivityError,
-    attach_media_rows,
+    archive_diamondseven_images,
+    attach_archive_media_rows,
+    diagnose_image_matches,
     ensure_wix_upload_connectivity,
+    load_manifest,
+    write_match_diagnostics,
+    write_manifest,
 )
 from .wix_template import (
     DEFAULT_WIX_TEMPLATE_HEADER,
@@ -18,31 +23,24 @@ from .wix_template import (
     load_template_header,
 )
 from .wix_writer import write_wix_csv
-from .xlsx_images import (
-    default_xlsx_image_export_dir,
-    default_xlsx_image_mapping_path,
-    extract_xlsx_row_images,
-    resolve_xlsx_image_export_dir,
-    write_image_mapping_csv,
-)
 
 __all__ = [
     "CANONICAL_COLUMNS",
     "DEFAULT_WIX_TEMPLATE_HEADER",
+    "MANIFEST_COLUMNS",
     "WixUploadConnectivityError",
-    "attach_media_rows",
-    "default_xlsx_image_export_dir",
-    "default_xlsx_image_mapping_path",
+    "archive_diamondseven_images",
+    "attach_archive_media_rows",
     "default_template_header",
+    "diagnose_image_matches",
     "ensure_wix_upload_connectivity",
-    "extract_xlsx_row_images",
     "load_template_header",
+    "load_manifest",
     "read_diamond_csv",
-    "read_diamond_xlsx",
     "read_diamond_file",
-    "resolve_xlsx_image_export_dir",
     "write_error_csv",
-    "write_image_mapping_csv",
     "write_issue_csv",
+    "write_manifest",
+    "write_match_diagnostics",
     "write_wix_csv",
 ]

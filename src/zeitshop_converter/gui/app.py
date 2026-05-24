@@ -27,12 +27,10 @@ sv_ttk = _load_sv_ttk()
 
 from ..conversion import convert_diamond_file
 from ..core.barcodes import ensure_unique_product_barcodes
-from ..core import ConversionBatch, ConversionOptions, ImageMigrationOptions, Severity, ValidationIssue
+from ..core import ConversionBatch, ConversionOptions, ImageArchiveOptions, Severity, ValidationIssue
 from ..io import (
     WixUploadConnectivityError,
-    default_xlsx_image_mapping_path,
     ensure_wix_upload_connectivity,
-    resolve_xlsx_image_export_dir,
     write_issue_csv,
     write_wix_csv,
 )
@@ -68,10 +66,8 @@ class GuiSettings:
     handle_prefix: str = "ds-"
     default_visible: bool = True
     output_dir: str = ""
-    image_migration_enabled: bool = False
-    image_directory: str = ""
-    export_embedded_images: bool = False
-    export_directory: str = ""
+    image_archive_enabled: bool = False
+    image_manifest: str = ""
     wix_site_id: str = ""
     wix_api_key: str = ""
     wix_image_path: str = "/zeitshop"
@@ -97,19 +93,15 @@ def _load_settings() -> GuiSettings:
     output_dir = str(payload.get("output_dir", settings.output_dir)).strip()
     settings.output_dir = output_dir
 
-    settings.image_migration_enabled = bool(
-        payload.get("image_migration_enabled", settings.image_migration_enabled)
+    settings.image_archive_enabled = bool(
+        payload.get(
+            "image_archive_enabled",
+            payload.get("image_migration_enabled", settings.image_archive_enabled),
+        )
     )
 
-    image_directory = str(payload.get("image_directory", settings.image_directory)).strip()
-    settings.image_directory = image_directory
-
-    settings.export_embedded_images = bool(
-        payload.get("export_embedded_images", settings.export_embedded_images)
-    )
-
-    export_directory = str(payload.get("export_directory", settings.export_directory)).strip()
-    settings.export_directory = export_directory
+    image_manifest = str(payload.get("image_manifest", settings.image_manifest)).strip()
+    settings.image_manifest = image_manifest
 
     wix_site_id = str(payload.get("wix_site_id", settings.wix_site_id)).strip()
     settings.wix_site_id = wix_site_id
@@ -144,8 +136,6 @@ class ConverterApp(tk.Tk):
         self.settings = _load_settings()
         self.batch: ConversionBatch | None = None
         self.diamond_path: Path | None = None
-        self.last_image_export_dir: Path | None = None
-        self.last_image_mapping_path: Path | None = None
         self._conversion_running = False
         self._conversion_events: queue.Queue[tuple[str, object, object | None]] = queue.Queue()
 
@@ -252,7 +242,7 @@ class ConverterApp(tk.Tk):
 
         ttk.Label(
             root,
-            text="DIAMOND-Datei (.csv/.xlsx) auswählen, konvertieren, und Wix-CSV herunterladen.",
+            text="DIAMOND-CSV auswählen, konvertieren, und Wix-CSV herunterladen.",
             style="SubHeader.TLabel",
         ).pack(fill="x", pady=(2, 12))
         ttk.Label(root, textvariable=self.status_var, style="SubHeader.TLabel").pack(fill="x", pady=(0, 10))
@@ -455,10 +445,9 @@ class ConverterApp(tk.Tk):
         output_dir_var = tk.StringVar(
             value=self.settings.output_dir or "Standard: gleicher Ordner wie die Eingabedatei",
         )
-        image_migration_var = tk.BooleanVar(value=self.settings.image_migration_enabled)
-        export_embedded_images_var = tk.BooleanVar(value=self.settings.export_embedded_images)
-        export_directory_var = tk.StringVar(
-            value=self.settings.export_directory or "Standard: interner Zeitshop-Bildcache",
+        image_archive_var = tk.BooleanVar(value=self.settings.image_archive_enabled)
+        image_manifest_var = tk.StringVar(
+            value=self.settings.image_manifest or "Kein lokales DiamondSEVEN-Bildarchiv ausgewählt",
         )
         wix_site_id_var = tk.StringVar(value=self.settings.wix_site_id)
         wix_api_key_var = tk.StringVar(value=self.settings.wix_api_key)
@@ -506,60 +495,48 @@ class ConverterApp(tk.Tk):
         ttk.Checkbutton(
             image_box,
             text="Produktbilder automatisch in Wix übernehmen",
-            variable=image_migration_var,
+            variable=image_archive_var,
         ).grid(row=0, column=0, columnspan=2, sticky="w")
 
         ttk.Label(
             image_box,
             text=(
-                "Lokale Bilddateien oder eingebettete XLSX-Bilder werden per Wix Media Manager hochgeladen. "
+                "Bilder werden aus dem lokalen DiamondSEVEN-Bildarchiv gelesen und per Wix Media Manager hochgeladen."
             ),
             wraplength=540,
         ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
-        ttk.Checkbutton(
-            image_box,
-            text="Eingebettete XLSX-Bilder in einen Ordner exportieren",
-            variable=export_embedded_images_var,
-        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(12, 0))
-
+        ttk.Label(image_box, text="Lokales DiamondSEVEN-Bildarchiv").grid(row=2, column=0, sticky="w", pady=(12, 0))
         ttk.Label(
             image_box,
-            text=(
-                "Beim Export werden die eingebetteten Excel-Bilder in einen Ordner kopiert und zusätzlich "
-                "eine Zuordnungstabelle mit Artikel Nr, Referenz und Bildpfad erstellt."
-            ),
+            textvariable=image_manifest_var,
             wraplength=540,
-        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(2, 0))
 
-        ttk.Label(image_box, text="Exportordner für XLSX-Bilder").grid(row=4, column=0, sticky="w", pady=(12, 0))
-        ttk.Label(
-            image_box,
-            textvariable=export_directory_var,
-            wraplength=540,
-        ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        def choose_image_manifest() -> None:
+            selected_file = filedialog.askopenfilename(
+                title="DiamondSEVEN-Bildarchiv Manifest auswählen",
+                filetypes=(("CSV Dateien", "*.csv *.CSV"), ("Alle Dateien", "*.*")),
+            )
+            if selected_file:
+                image_manifest_var.set(selected_file)
 
-        def choose_export_dir() -> None:
-            selected_dir = filedialog.askdirectory(title="Exportordner für XLSX-Bilder auswählen")
-            if selected_dir:
-                export_directory_var.set(selected_dir)
+        def reset_image_manifest() -> None:
+            image_manifest_var.set("Kein lokales DiamondSEVEN-Bildarchiv ausgewählt")
 
-        def reset_export_dir() -> None:
-            export_directory_var.set("Standard: interner Zeitshop-Bildcache")
+        manifest_actions = ttk.Frame(image_box)
+        manifest_actions.grid(row=4, column=0, sticky="w", pady=(8, 0))
+        ttk.Button(manifest_actions, text="Manifest wählen", command=choose_image_manifest).pack(side="left")
+        ttk.Button(manifest_actions, text="Entfernen", command=reset_image_manifest).pack(side="left", padx=(8, 0))
 
-        export_actions = ttk.Frame(image_box)
-        export_actions.grid(row=6, column=0, sticky="w", pady=(8, 0))
-        ttk.Button(export_actions, text="Ordner wählen", command=choose_export_dir).pack(side="left")
-        ttk.Button(export_actions, text="Standard nutzen", command=reset_export_dir).pack(side="left", padx=(8, 0))
+        ttk.Label(image_box, text="Wix Site ID").grid(row=5, column=0, sticky="w", pady=(12, 0))
+        ttk.Entry(image_box, textvariable=wix_site_id_var, width=44).grid(row=6, column=0, sticky="w")
 
-        ttk.Label(image_box, text="Wix Site ID").grid(row=7, column=0, sticky="w", pady=(12, 0))
-        ttk.Entry(image_box, textvariable=wix_site_id_var, width=44).grid(row=8, column=0, sticky="w")
+        ttk.Label(image_box, text="Wix API Key").grid(row=7, column=0, sticky="w", pady=(12, 0))
+        ttk.Entry(image_box, textvariable=wix_api_key_var, width=44, show="*").grid(row=8, column=0, sticky="w")
 
-        ttk.Label(image_box, text="Wix API Key").grid(row=9, column=0, sticky="w", pady=(12, 0))
-        ttk.Entry(image_box, textvariable=wix_api_key_var, width=44, show="*").grid(row=10, column=0, sticky="w")
-
-        ttk.Label(image_box, text="Wix Medienpfad").grid(row=11, column=0, sticky="w", pady=(12, 0))
-        ttk.Entry(image_box, textvariable=wix_image_path_var, width=44).grid(row=12, column=0, sticky="w")
+        ttk.Label(image_box, text="Wix Medienpfad").grid(row=9, column=0, sticky="w", pady=(12, 0))
+        ttk.Entry(image_box, textvariable=wix_image_path_var, width=44).grid(row=10, column=0, sticky="w")
 
         form.columnconfigure(0, weight=1)
 
@@ -574,15 +551,12 @@ class ConverterApp(tk.Tk):
             else:
                 self.settings.output_dir = output_dir_text
 
-            self.settings.image_migration_enabled = image_migration_var.get()
-            self.settings.image_directory = ""
-
-            self.settings.export_embedded_images = export_embedded_images_var.get()
-            export_directory_text = export_directory_var.get().strip()
-            if export_directory_text.startswith("Standard:"):
-                self.settings.export_directory = ""
+            self.settings.image_archive_enabled = image_archive_var.get()
+            image_manifest_text = image_manifest_var.get().strip()
+            if image_manifest_text.startswith("Kein lokales"):
+                self.settings.image_manifest = ""
             else:
-                self.settings.export_directory = export_directory_text
+                self.settings.image_manifest = image_manifest_text
 
             self.settings.wix_site_id = wix_site_id_var.get().strip()
             self.settings.wix_api_key = wix_api_key_var.get().strip()
@@ -612,11 +586,10 @@ class ConverterApp(tk.Tk):
             return
 
         selected = filedialog.askopenfilename(
-            title="diamond datei (.csv/.xlsx) auswählen",
+            title="diamond csv datei auswählen",
             filetypes=(
-                ("DIAMOND Dateien", "*.csv *.CSV *.xlsx *.XLSX"),
+                ("DIAMOND CSV Dateien", "*.csv *.CSV"),
                 ("CSV Dateien", "*.csv *.CSV"),
-                ("Excel Dateien", "*.xlsx *.XLSX"),
                 ("Alle Dateien", "*.*"),
             ),
         )
@@ -633,11 +606,9 @@ class ConverterApp(tk.Tk):
             default_visible=self.settings.default_visible,
             numeric_inventory=True,
             handle_prefix=self.settings.handle_prefix,
-            image_migration=ImageMigrationOptions(
-                enabled=self.settings.image_migration_enabled,
-                image_directory="",
-                export_embedded_images=self.settings.export_embedded_images,
-                export_directory=self.settings.export_directory,
+            image_archive=ImageArchiveOptions(
+                enabled=self.settings.image_archive_enabled,
+                manifest_path=self.settings.image_manifest,
                 wix_site_id=self.settings.wix_site_id or os.environ.get("ZEITSHOP_WIX_SITE_ID", ""),
                 wix_api_key=self.settings.wix_api_key or os.environ.get("ZEITSHOP_WIX_API_KEY", ""),
                 wix_file_path=self.settings.wix_image_path,
@@ -646,7 +617,7 @@ class ConverterApp(tk.Tk):
 
     def _ensure_wix_upload_connectivity(self, options: ConversionOptions) -> None:
         """Stop before conversion when Wix-upload mode is enabled but the machine is offline."""
-        image_options = options.image_migration
+        image_options = options.image_archive
         if image_options is None or not image_options.enabled:
             return
         if not str(image_options.wix_site_id).strip() or not str(image_options.wix_api_key).strip():
@@ -698,7 +669,6 @@ class ConverterApp(tk.Tk):
         has_issues = bool(self.batch.issue_rows)
         self.download_issue_button.configure(state="normal" if has_issues else "disabled")
 
-        image_export_note = self._image_export_summary(options)
         messagebox.showinfo(
             "Konvertierung abgeschlossen",
             (
@@ -707,7 +677,6 @@ class ConverterApp(tk.Tk):
                 f"Gültig: {len(self.batch.valid_product_rows)}\n"
                 f"Fehler: {self.batch.error_count}\n"
                 f"Warnungen: {self.batch.warning_count}"
-                f"{image_export_note}"
             ),
         )
         self.status_var.set("Konvertierung abgeschlossen.")
@@ -755,8 +724,6 @@ class ConverterApp(tk.Tk):
             messagebox.showerror("Konvertierung fehlgeschlagen", message)
             return
 
-        self.last_image_export_dir = None
-        self.last_image_mapping_path = None
         self._conversion_running = True
         self.status_var.set("Konvertierung läuft...")
         self.progressbar.configure(maximum=1, value=0)
@@ -771,7 +738,7 @@ class ConverterApp(tk.Tk):
                     options=options,
                     progress_callback=(
                         self._report_progress_async
-                        if options.image_migration and options.image_migration.enabled
+                        if options.image_archive and options.image_archive.enabled
                         else None
                     ),
                 )
@@ -783,40 +750,6 @@ class ConverterApp(tk.Tk):
 
         threading.Thread(target=worker, daemon=True).start()
         self.after(100, self._poll_conversion_events)
-
-    def _image_export_summary(self, options: ConversionOptions) -> str:
-        """Report exported XLSX image folder and mapping file when enabled."""
-        if (
-            self.diamond_path is None
-            or self.diamond_path.suffix.casefold() != ".xlsx"
-            or options.image_migration is None
-            or not options.image_migration.export_embedded_images
-        ):
-            return ""
-
-        export_dir = resolve_xlsx_image_export_dir(
-            self.diamond_path,
-            output_dir=options.image_migration.export_directory or None,
-        )
-        mapping_path = default_xlsx_image_mapping_path(
-            self.diamond_path,
-            output_dir=options.image_migration.export_directory or None,
-        )
-        self.last_image_export_dir = export_dir
-        self.last_image_mapping_path = mapping_path
-
-        mapped_rows = 0
-        if mapping_path.exists():
-            try:
-                lines = mapping_path.read_text(encoding="utf-8").splitlines()
-            except OSError:
-                lines = []
-            mapped_rows = max(len(lines) - 1, 0)
-
-        return (
-            "\n\nXLSX-Bildexport:\n"
-            f"Quellzeilen mit Bild: {mapped_rows}"
-        )
 
     def _default_download_directory(self) -> Path:
         """Prefer configured output directory, then input-file folder, then home."""

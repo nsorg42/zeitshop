@@ -37,20 +37,19 @@ class ConversionOptions:
     default_visible: bool = False
     numeric_inventory: bool = True
     handle_prefix: str = "ds-"
-    image_migration: "ImageMigrationOptions | None" = None
+    image_archive: "ImageArchiveOptions | None" = None
 
 
 @dataclass(frozen=True)
-class ImageMigrationOptions:
-    """Optional settings for resolving and migrating product images."""
+class ImageArchiveOptions:
+    """Optional settings for matching archived DIAMOND images and uploading them."""
 
     enabled: bool = False
-    image_directory: str = ""
-    export_embedded_images: bool = False
-    export_directory: str = ""
+    manifest_path: str = ""
     wix_site_id: str = ""
     wix_api_key: str = ""
     wix_file_path: str = "/zeitshop"
+    max_images_per_product: int = 15
 
 
 @dataclass
