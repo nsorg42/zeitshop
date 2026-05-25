@@ -139,7 +139,16 @@ def validate_wix_row(row: Mapping[str, str], source_row: int) -> list[Validation
         )
 
     sku = normalize_text(row.get("sku"))
-    if len(sku) > 40:
+    if not sku:
+        issues.append(
+            ValidationIssue(
+                source_row=source_row,
+                field="sku",
+                severity=Severity.ERROR,
+                message="sku is required.",
+            )
+        )
+    elif len(sku) > 40:
         issues.append(
             ValidationIssue(
                 source_row=source_row,

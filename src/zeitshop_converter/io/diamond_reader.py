@@ -44,6 +44,15 @@ ALIASES: dict[str, str] = {
 }
 
 
+def _detect_source_format(header: Sequence[str]) -> str:
+    """Infer a coarse source format from the available DIAMOND headers."""
+    columns = {normalize_text(column) for column in header if normalize_text(column)}
+    lager_markers = {"Bild", "Serien Nr", "AURONOS", "Status"}
+    if {"Artikel Nr", "Referenz", "Menge", "Einstand", "Verkauf"}.issubset(columns) and columns & lager_markers:
+        return "lager_csv"
+    return "diamond_csv"
+
+
 def _canonical_header(raw_header: str) -> str:
     """Normalize source header and map aliases to canonical names."""
     cleaned = normalize_text(raw_header).lstrip("\ufeff")
@@ -146,6 +155,7 @@ def read_diamond_csv(path: str | Path) -> list[DiamondRecord]:
         return []
 
     keep_indexes, final_header = _header_indexes(raw_header)
+    source_format = _detect_source_format(final_header)
 
     records: list[DiamondRecord] = []
     for source_row, raw_row in enumerate(reader, start=2):
@@ -162,7 +172,7 @@ def read_diamond_csv(path: str | Path) -> list[DiamondRecord]:
         if _is_header_like_row(canonical):
             continue
 
-        records.append(DiamondRecord(source_row=source_row, data=canonical))
+        records.append(DiamondRecord(source_row=source_row, data=canonical, source_format=source_format))
 
     return records
 

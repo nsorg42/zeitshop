@@ -5,8 +5,9 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-from zeitshop_converter.core import ConversionBatch, Severity, ValidationIssue, WixRowResult
+from zeitshop_converter.core import ConversionBatch, InventoryUpdateBatch, InventoryUpdateResult, Severity, ValidationIssue, WixRowResult
 from zeitshop_converter.gui import app as gui_app
+from zeitshop_converter.io import ReportDescriptionRecord
 
 
 class DummyVar:
@@ -84,32 +85,20 @@ def test_save_and_load_settings_round_trip_with_normalization(
 
     gui_app._save_settings(
         gui_app.GuiSettings(
-            handle_prefix="custom-",
             default_visible=False,
-            output_dir="/tmp/out",
         )
     )
 
     loaded = gui_app._load_settings()
 
     assert loaded == gui_app.GuiSettings(
-            handle_prefix="custom-",
             default_visible=False,
-            output_dir="/tmp/out",
     )
-
-    settings_path.write_text(
-        json.dumps({"handle_prefix": " "}),
-        encoding="utf-8",
-    )
-    loaded = gui_app._load_settings()
-    assert loaded.handle_prefix == "ds-"
 
 
 def test_build_options_uses_settings() -> None:
     fake_app = SimpleNamespace(
         settings=gui_app.GuiSettings(
-            handle_prefix="hp-",
             default_visible=False,
         )
     )
@@ -117,26 +106,29 @@ def test_build_options_uses_settings() -> None:
     options = gui_app.ConverterApp._build_options(fake_app)
 
     assert options.default_visible is False
-    assert options.handle_prefix == "hp-"
+    assert options.handle_prefix == "ds-"
 
 
 def test_default_download_helpers_use_configured_and_source_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_app = SimpleNamespace(
-        settings=gui_app.GuiSettings(output_dir="~/exports"),
+        settings=gui_app.GuiSettings(),
         diamond_path=Path("/tmp/input.csv"),
+        wix_export_path=Path("/tmp/catalog_products.csv"),
+        mode_var=DummyVar("import"),
     )
-    assert gui_app.ConverterApp._default_download_directory(fake_app) == Path("~/exports").expanduser()
+    assert gui_app.ConverterApp._default_download_directory(fake_app) == Path("/tmp")
     assert gui_app.ConverterApp._default_wix_filename(fake_app) == "input_wix_import.csv"
     assert gui_app.ConverterApp._default_issue_filename(fake_app, Severity.ERROR) == "input_fehler.csv"
     assert gui_app.ConverterApp._default_issue_filename(fake_app, Severity.WARNING) == "input_warnungen.csv"
     assert gui_app.ConverterApp._default_issue_filename(fake_app) == "input_issues.csv"
 
-    fake_app.settings.output_dir = ""
-    assert gui_app.ConverterApp._default_download_directory(fake_app) == Path("/tmp")
-
     fake_app.diamond_path = None
     assert gui_app.ConverterApp._default_download_directory(fake_app) == Path.home()
     assert gui_app.ConverterApp._default_wix_filename(fake_app) == "wix_import.csv"
+
+    fake_app.mode_var.set("update")
+    assert gui_app.ConverterApp._default_download_directory(fake_app) == Path("/tmp")
+    assert gui_app.ConverterApp._default_wix_filename(fake_app) == "catalog_products_inventory_update.csv"
 
 
 def test_report_progress_matches_search_and_sort_key() -> None:
@@ -154,7 +146,7 @@ def test_report_progress_matches_search_and_sort_key() -> None:
             "brand",
             "plain_description",
             "price",
-            "cost",
+            "inventory",
             "referenznummer",
         ),
         _preview_overrides={},
@@ -320,6 +312,125 @@ def test_build_export_rows_rewrites_duplicate_barcodes_after_edit() -> None:
     assert len(rows) == 2
     assert rows[0]["barcode"] == "ART-4"
     assert rows[1]["barcode"] == "ART-5"
+
+
+def test_apply_report_descriptions_matches_by_article_and_reference() -> None:
+    first = WixRowResult(
+        source_row=4,
+        source={"Artikel Nr": "ART-4", "Referenz": "REF-4"},
+        wix_row={"plainDescription": "", "barcode": "REF-4"},
+    )
+    second = WixRowResult(
+        source_row=5,
+        source={"Artikel Nr": "ART-5", "Referenz": "REF-5"},
+        wix_row={"plainDescription": "", "barcode": "REF-5"},
+    )
+    fake_app = SimpleNamespace(
+        batch=ConversionBatch(header=[], results=[first, second]),
+        _preview_overrides={},
+    )
+    fake_app._base_value_for_column = lambda current, column: gui_app.ConverterApp._base_value_for_column(
+        fake_app, current, column
+    )
+    fake_app._value_for_column = lambda current, column: gui_app.ConverterApp._value_for_column(
+        fake_app, current, column
+    )
+    fake_app._store_preview_override = lambda current, column, value: gui_app.ConverterApp._store_preview_override(
+        fake_app, current, column, value
+    )
+
+    matched = gui_app.ConverterApp._apply_report_descriptions(
+        fake_app,
+        [
+            ReportDescriptionRecord(
+                source_row=10,
+                artikel_nr="ART-4",
+                referenz="",
+                beschreibung="Specs 4",
+            ),
+            ReportDescriptionRecord(
+                source_row=11,
+                artikel_nr="",
+                referenz="REF-5",
+                beschreibung="Specs 5",
+            ),
+        ],
+    )
+
+    assert matched == 2
+    assert fake_app._preview_overrides == {
+        4: {"plain_description": "Specs 4"},
+        5: {"plain_description": "Specs 5"},
+    }
+
+
+def test_apply_report_descriptions_prepends_description_to_existing_availability() -> None:
+    result = WixRowResult(
+        source_row=4,
+        source={"Artikel Nr": "ART-4", "Referenz": "REF-4"},
+        wix_row={
+            "plainDescription": "Verfügbar in dem Ladengeschäft Bijouterie Am Bogen in Bremgarten AG",
+            "barcode": "REF-4",
+        },
+    )
+    fake_app = SimpleNamespace(
+        batch=ConversionBatch(header=[], results=[result]),
+        _preview_overrides={},
+    )
+    fake_app._base_value_for_column = lambda current, column: gui_app.ConverterApp._base_value_for_column(
+        fake_app, current, column
+    )
+    fake_app._value_for_column = lambda current, column: gui_app.ConverterApp._value_for_column(
+        fake_app, current, column
+    )
+    fake_app._store_preview_override = lambda current, column, value: gui_app.ConverterApp._store_preview_override(
+        fake_app, current, column, value
+    )
+
+    matched = gui_app.ConverterApp._apply_report_descriptions(
+        fake_app,
+        [
+            ReportDescriptionRecord(
+                source_row=10,
+                artikel_nr="ART-4",
+                referenz="",
+                beschreibung="Specs 4",
+            ),
+        ],
+    )
+
+    assert matched == 1
+    assert fake_app._preview_overrides == {
+        4: {
+            "plain_description": "Specs 4\nVerfügbar in dem Ladengeschäft Bijouterie Am Bogen in Bremgarten AG"
+        }
+    }
+
+
+def test_build_export_rows_returns_update_rows_in_update_mode() -> None:
+    update_batch = InventoryUpdateBatch(
+        header=["sku", "inventory"],
+        rows=[{"sku": "A1", "inventory": "3"}],
+        results=[
+            InventoryUpdateResult(
+                source_row=2,
+                wix_row={"sku": "A1", "inventory": "3", "name": "Alpha"},
+                original_inventory="1",
+                updated_inventory="3",
+                matched=True,
+                changed=True,
+            )
+        ],
+    )
+    fake_app = SimpleNamespace(
+        mode_var=DummyVar("update"),
+        update_batch=update_batch,
+    )
+
+    rows, errors = gui_app.ConverterApp._build_export_rows(fake_app)
+
+    assert rows == [{"sku": "A1", "inventory": "3"}]
+    assert errors == []
 
 
 def test_finish_conversion_error_shows_exception_message(monkeypatch: pytest.MonkeyPatch) -> None:

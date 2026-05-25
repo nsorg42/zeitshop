@@ -7,8 +7,6 @@ from .models import ConversionOptions, DiamondRecord, Severity, ValidationIssue
 from .normalize import format_decimal, make_handle, normalize_inventory, normalize_text, parse_decimal
 
 _WORD_RE = re.compile(r"[^\W_]+", flags=re.UNICODE)
-
-
 def _tokens_equal(left: str, right: str) -> bool:
     """Case-insensitive token comparison with simple plural handling."""
     a = left.casefold()
@@ -114,9 +112,30 @@ def _build_name(record: DiamondRecord) -> tuple[str, bool]:
 
 def _build_plain_description(record: DiamondRecord) -> str:
     """Compose a simple human-readable description from optional source fields."""
+    if record.source_format == "lager_csv":
+        items: list[str] = []
+        referenz = normalize_text(record.data.get("Referenz"))
+        if referenz:
+            items.append(f"Referenz: {referenz}")
+
+        branch_names = [normalize_text(part) for part in record.data.get("Filiale", "").split("|")]
+        branches = [branch for branch in branch_names if branch]
+        if branches == ["Am Bogen"]:
+            items.append("Verfügbar in dem Ladengeschäft Bijouterie Am Bogen in Bremgarten AG")
+            return "\n".join(items)
+        if branches == ["Droz"]:
+            items.append("Verfügbar in dem Ladengeschäft Bijouterie Droz in Zofingen AG")
+            return "\n".join(items)
+        if set(branches) == {"Am Bogen", "Droz"}:
+            items.append(
+                "Verfügbar in den Ladengeschäften Bijouterie Am Bogen in Bremgarten AG "
+                "und in der Bijouterie Droz in Zofingen AG"
+            )
+            return "\n".join(items)
+        return ""
 
     items: list[str] = []
-    warengruppe = normalize_text(record.data.get("Warengruppe"))
+    warengruppe = _normalize_category_text(record.data.get("Warengruppe"))
     kategorie = normalize_text(record.data.get("Kategorie"))
 
     if warengruppe:
@@ -125,6 +144,67 @@ def _build_plain_description(record: DiamondRecord) -> str:
         items.append(f"Kategorie: {kategorie}")
 
     return " | ".join(items)
+
+
+def _normalize_category_text(value: str | None) -> str:
+    """Canonicalize mixed-category labels before display or slug mapping."""
+    text = normalize_text(value)
+    if not text:
+        return ""
+
+    compact = (
+        text.casefold()
+        .replace(" ", "")
+        .replace("-", "")
+        .replace("/", "")
+        .replace("&", "")
+        .replace("und", "")
+    )
+    if compact == "collier":
+        return "Colliers"
+    if compact == "ring":
+        return "Ringe"
+    if text.casefold().endswith("uhr"):
+        return f"{text}en"
+    return text
+
+
+def _category_slugs_for_value(value: str | None) -> list[str]:
+    """Expand one DIAMOND category value into one or more Wix category slugs."""
+    text = normalize_text(value)
+    if not text:
+        return []
+
+    compact = (
+        text.casefold()
+        .replace(" ", "")
+        .replace("-", "")
+        .replace("/", "")
+        .replace("&", "")
+        .replace("und", "")
+    )
+    if compact in {"herrendamenuhr", "herrendamen"}:
+        return ["herrenuhren", "damenuhren"]
+
+    slug = make_handle(_normalize_category_text(text), prefix="")
+    if slug == "armbanduhren":
+        return []
+    return [slug] if slug else []
+
+
+def _build_category_slugs(record: DiamondRecord) -> tuple[str, str]:
+    """Build Wix category slug fields from DIAMOND category values."""
+    broad_slugs = _category_slugs_for_value(record.data.get("Kategorie"))
+    broad = broad_slugs[0] if broad_slugs else ""
+    fine_slugs = _category_slugs_for_value(record.data.get("Warengruppe"))
+    brand = make_handle(normalize_text(record.data.get("Marke")), prefix="")
+
+    slugs: list[str] = []
+    for slug in [*broad_slugs, *fine_slugs, brand]:
+        if slug and slug not in slugs:
+            slugs.append(slug)
+
+    return broad, ";".join(slugs)
 
 
 def _dedupe_handle(base_handle: str, seen_handles: MutableMapping[str, int]) -> tuple[str, bool]:
@@ -151,7 +231,7 @@ def map_diamond_to_wix_row(
     article_nr = normalize_text(record.data.get("Artikel Nr"))
     referenz = normalize_text(record.data.get("Referenz"))
 
-    base_handle_seed = article_nr or referenz or str(record.source_row)
+    base_handle_seed = article_nr or str(record.source_row)
     base_handle = make_handle(base_handle_seed, prefix=options.handle_prefix)
     handle, deduped = _dedupe_handle(base_handle, seen_handles)
 
@@ -181,8 +261,16 @@ def map_diamond_to_wix_row(
     row["name"] = name
     row["visible"] = "TRUE" if options.default_visible else "FALSE"
     row["brand"] = normalize_text(record.data.get("Marke"))
-    row["plainDescription"] = _build_plain_description(record)
-    row["sku"] = article_nr or referenz
+    description = _build_plain_description(record)
+    row["plainDescription"] = description
+    if "Beschreibung" in row:
+        row["Beschreibung"] = description
+    primary_category_slug, category_slugs = _build_category_slugs(record)
+    if "primaryCategorySlug" in row:
+        row["primaryCategorySlug"] = primary_category_slug
+    if "categorySlugs" in row:
+        row["categorySlugs"] = category_slugs
+    row["sku"] = article_nr
     if "barcode" in row and referenz:
         row["barcode"] = referenz
 

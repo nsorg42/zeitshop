@@ -22,13 +22,12 @@ _MERGE_BLOCKER_FIELDS = ("Einstand", "Verkauf", "Menge")
 def _record_identity(record: DiamondRecord) -> str:
     """Build a stable grouping key for duplicate rows.
 
-    Artikel number is the primary identity. If unavailable, referenz is used.
-    As a last fallback we use source row, which keeps the row unique.
+    Artikel number is the primary identity.
+    If unavailable we use source row, which keeps the row unique.
     """
 
     article_nr = normalize_text(record.data.get("Artikel Nr"))
-    referenz = normalize_text(record.data.get("Referenz"))
-    return article_nr or referenz or f"row-{record.source_row}"
+    return article_nr or f"row-{record.source_row}"
 
 
 def _merge_conflict_key(field: str, value: str | None) -> object:
@@ -135,17 +134,24 @@ def _merge_compatible_rows(rows: list[DiamondRecord]) -> DiamondRecord:
     merged_data = dict(base.data)
     qty_total = 0
     qty_found = False
+    branches: list[str] = []
 
     for row in rows:
+        branch = normalize_text(row.data.get("Filiale"))
+        if branch and branch not in branches:
+            branches.append(branch)
         qty = parse_quantity(row.data.get("Menge"))
         if qty is not None:
             qty_total += qty
             qty_found = True
 
+    if branches:
+        merged_data["Filiale"] = " | ".join(branches)
+
     if qty_found:
         merged_data["Menge"] = str(max(qty_total, 0))
 
-    return DiamondRecord(source_row=base.source_row, data=merged_data)
+    return DiamondRecord(source_row=base.source_row, data=merged_data, source_format=base.source_format)
 
 
 def _merge_records_by_identity(

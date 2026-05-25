@@ -12,6 +12,8 @@ def _template_header() -> list[str]:
         "name",
         "visible",
         "plainDescription",
+        "categorySlugs",
+        "primaryCategorySlug",
         "brand",
         "price",
         "cost",
@@ -64,6 +66,159 @@ def test_pipeline_maps_valid_and_invalid_rows() -> None:
     assert valid["inventory"] == "3"
 
 
+def test_pipeline_builds_lager_plain_description_with_reference_and_availability() -> None:
+    records = [
+        DiamondRecord(
+            source_row=2,
+            source_format="lager_csv",
+            data={
+                "Artikel Nr": "123",
+                "Referenz": "R-1",
+                "Filiale": "Am Bogen",
+                "Marke": "Brand",
+                "Produktlinie": "Line",
+                "Kurzbeschreibung": "",
+                "Verkauf": "99",
+                "Einstand": "40.50",
+                "Menge": "3",
+                "Warengruppe": "Category-A",
+                "Kategorie": "Group-A",
+            },
+        )
+    ]
+
+    batch = convert_records(records, _template_header(), ConversionOptions())
+
+    assert (
+        batch.valid_rows[0]["plainDescription"]
+        == "Referenz: R-1\nVerfügbar in dem Ladengeschäft Bijouterie Am Bogen in Bremgarten AG"
+    )
+
+
+def test_pipeline_maps_kategorie_and_warengruppe_to_wix_categories() -> None:
+    records = [
+        DiamondRecord(
+            source_row=2,
+            data={
+                "Artikel Nr": "123",
+                "Referenz": "R-1",
+                "Marke": "Brand",
+                "Produktlinie": "Line",
+                "Kurzbeschreibung": "",
+                "Verkauf": "99",
+                "Einstand": "40.50",
+                "Menge": "3",
+                "Warengruppe": "Herrenuhr",
+                "Kategorie": "Uhr",
+            },
+        )
+    ]
+
+    batch = convert_records(records, _template_header(), ConversionOptions())
+
+    assert batch.valid_rows[0]["primaryCategorySlug"] == "uhren"
+    assert batch.valid_rows[0]["categorySlugs"] == "uhren;herrenuhren;brand"
+
+
+def test_pipeline_normalizes_mixed_herren_damen_category_syntax() -> None:
+    records = [
+        DiamondRecord(
+            source_row=2,
+            data={
+                "Artikel Nr": "123",
+                "Referenz": "R-1",
+                "Marke": "Brand",
+                "Produktlinie": "Line",
+                "Kurzbeschreibung": "",
+                "Verkauf": "99",
+                "Einstand": "40.50",
+                "Menge": "3",
+                "Warengruppe": "Herren / Damenuhr",
+                "Kategorie": "Uhr",
+            },
+        )
+    ]
+
+    batch = convert_records(records, _template_header(), ConversionOptions())
+
+    assert batch.valid_rows[0]["categorySlugs"] == "uhren;herrenuhren;damenuhren;brand"
+
+
+def test_pipeline_ignores_armbanduhren_category() -> None:
+    records = [
+        DiamondRecord(
+            source_row=2,
+            data={
+                "Artikel Nr": "123",
+                "Referenz": "R-1",
+                "Marke": "Brand",
+                "Produktlinie": "Line",
+                "Kurzbeschreibung": "",
+                "Verkauf": "99",
+                "Einstand": "40.50",
+                "Menge": "3",
+                "Warengruppe": "Armbanduhr",
+                "Kategorie": "Uhr",
+            },
+        )
+    ]
+
+    batch = convert_records(records, _template_header(), ConversionOptions())
+
+    assert batch.valid_rows[0]["primaryCategorySlug"] == "uhren"
+    assert batch.valid_rows[0]["categorySlugs"] == "uhren;brand"
+
+
+def test_pipeline_pluralizes_collier_category() -> None:
+    records = [
+        DiamondRecord(
+            source_row=2,
+            data={
+                "Artikel Nr": "123",
+                "Referenz": "R-1",
+                "Marke": "Brand",
+                "Produktlinie": "Line",
+                "Kurzbeschreibung": "",
+                "Verkauf": "99",
+                "Einstand": "40.50",
+                "Menge": "3",
+                "Warengruppe": "Collier",
+                "Kategorie": "Schmuck",
+            },
+        )
+    ]
+
+    batch = convert_records(records, _template_header(), ConversionOptions())
+
+    assert batch.valid_rows[0]["primaryCategorySlug"] == "schmuck"
+    assert batch.valid_rows[0]["categorySlugs"] == "schmuck;colliers;brand"
+
+
+def test_pipeline_pluralizes_ring_category() -> None:
+    records = [
+        DiamondRecord(
+            source_row=2,
+            data={
+                "Artikel Nr": "123",
+                "Referenz": "R-1",
+                "Marke": "Brand",
+                "Produktlinie": "Line",
+                "Kurzbeschreibung": "",
+                "Verkauf": "99",
+                "Einstand": "40.50",
+                "Menge": "3",
+                "Warengruppe": "Ring",
+                "Kategorie": "Schmuck",
+            },
+        )
+    ]
+
+    batch = convert_records(records, _template_header(), ConversionOptions())
+
+    assert batch.valid_rows[0]["primaryCategorySlug"] == "schmuck"
+    assert batch.valid_rows[0]["categorySlugs"] == "schmuck;ringe;brand"
+
+
 def test_pipeline_merges_duplicate_article_numbers_when_only_branch_and_quantity_differ() -> None:
     records = [
         DiamondRecord(
@@ -103,6 +258,50 @@ def test_pipeline_merges_duplicate_article_numbers_when_only_branch_and_quantity
     assert row["sku"] == "DUP-1"
     assert row["inventory"] == "3"
     assert not any(issue.field == "merge" for issue in result.issues)
+
+
+def test_pipeline_merges_lager_branches_into_combined_availability_text() -> None:
+    records = [
+        DiamondRecord(
+            source_row=2,
+            source_format="lager_csv",
+            data={
+                "Artikel Nr": "DUP-1",
+                "Referenz": "REF-1",
+                "Filiale": "Am Bogen",
+                "Marke": "Brand",
+                "Produktlinie": "Line",
+                "Kurzbeschreibung": "",
+                "Verkauf": "10",
+                "Einstand": "5",
+                "Menge": "1",
+            },
+        ),
+        DiamondRecord(
+            source_row=3,
+            source_format="lager_csv",
+            data={
+                "Artikel Nr": "DUP-1",
+                "Referenz": "REF-1",
+                "Filiale": "Droz",
+                "Marke": "Brand",
+                "Produktlinie": "Line",
+                "Kurzbeschreibung": "",
+                "Verkauf": "10",
+                "Einstand": "5",
+                "Menge": "2",
+            },
+        ),
+    ]
+
+    batch = convert_records(records, _template_header(), ConversionOptions())
+
+    assert len(batch.results) == 1
+    assert (
+        batch.results[0].wix_row["plainDescription"]
+        == "Referenz: REF-1\nVerfügbar in den Ladengeschäften Bijouterie Am Bogen in Bremgarten AG "
+        "und in der Bijouterie Droz in Zofingen AG"
+    )
 
 
 def test_pipeline_builds_non_duplicated_names() -> None:
@@ -469,3 +668,44 @@ def test_pipeline_reports_invalid_numeric_fields_once() -> None:
     issue_counts = Counter(issue.field for issue in batch.results[0].issues)
 
     assert issue_counts == Counter({"price": 1, "cost": 1, "inventory": 1})
+
+
+def test_pipeline_requires_artikel_nr_and_does_not_fallback_to_referenz() -> None:
+    records = [
+        DiamondRecord(
+            source_row=60,
+            data={
+                "Artikel Nr": "",
+                "Referenz": "REF-ONLY",
+                "Marke": "Brand",
+                "Produktlinie": "Line",
+                "Kurzbeschreibung": "Model A",
+                "Verkauf": "100",
+                "Einstand": "50",
+                "Menge": "1",
+            },
+        ),
+        DiamondRecord(
+            source_row=61,
+            data={
+                "Artikel Nr": "",
+                "Referenz": "REF-ONLY",
+                "Marke": "Brand",
+                "Produktlinie": "Line",
+                "Kurzbeschreibung": "Model A",
+                "Verkauf": "100",
+                "Einstand": "50",
+                "Menge": "2",
+            },
+        ),
+    ]
+
+    batch = convert_records(records, _template_header(), ConversionOptions())
+
+    assert len(batch.results) == 2
+    assert batch.error_count == 2
+    assert batch.warning_count == 0
+    assert [result.wix_row["sku"] for result in batch.results] == ["", ""]
+    assert [result.wix_row["barcode"] for result in batch.results] == ["ds-60", "ds-61"]
+    for result in batch.results:
+        assert any(issue.field == "sku" and issue.message == "sku is required." for issue in result.issues)

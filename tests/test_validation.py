@@ -34,6 +34,7 @@ def test_validate_wix_row_accepts_valid_product_row() -> None:
         ({"inventory": "1.5"}, "inventory", "inventory must be IN_STOCK, OUT_OF_STOCK, or an integer."),
         ({"cost": "1000000000.00"}, "cost", "cost must be numeric with <=9 whole digits and <=2 decimals."),
         ({"cost": "10.123"}, "cost", "cost must be numeric with <=9 whole digits and <=2 decimals."),
+        ({"sku": ""}, "sku", "sku is required."),
     ],
 )
 def test_validate_wix_row_reports_expected_errors(

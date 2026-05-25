@@ -58,3 +58,5 @@ def test_parse_quantity_rejects_fractional_values(raw: str) -> None:
 def test_make_handle_strips_unsafe_characters() -> None:
     assert make_handle("AB 12/34", prefix="ds-") == "ds-ab-1234"
     assert make_handle("  Fancy  Name  ", prefix="") == "fancy-name"
+    assert make_handle("Anhänger", prefix="") == "anhaenger"
+    assert make_handle("Perlenstränge", prefix="") == "perlenstraenge"

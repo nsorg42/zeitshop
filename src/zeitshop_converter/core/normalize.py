@@ -6,6 +6,12 @@ import re
 
 _SPACE_RE = re.compile(r"\s+")
 _HANDLE_RE = re.compile(r"[^a-z0-9-]+")
+_GERMAN_SLUG_REPLACEMENTS = str.maketrans({
+    "ä": "ae",
+    "ö": "oe",
+    "ü": "ue",
+    "ß": "ss",
+})
 
 
 def normalize_text(value: str | None) -> str:
@@ -98,6 +104,7 @@ def normalize_inventory(value: str | None, numeric_inventory: bool = True) -> st
 def make_handle(raw: str | None, prefix: str = "ds-") -> str:
     """Create a URL-safe handle string from free-form text."""
     body = normalize_text(raw).lower()
+    body = body.translate(_GERMAN_SLUG_REPLACEMENTS)
     body = body.replace(" ", "-")
     body = _HANDLE_RE.sub("", body)
     body = re.sub(r"-+", "-", body).strip("-")

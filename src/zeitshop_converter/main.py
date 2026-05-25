@@ -17,7 +17,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("gui", help="start the desktop GUI")
 
-    convert = sub.add_parser("convert", help="convert a DIAMOND CSV into Wix import CSV")
+    convert = sub.add_parser(
+        "convert", help="convert a DIAMOND CSV into Wix import CSV"
+    )
     convert.add_argument("--diamond", required=True, help="path to DIAMOND CSV")
     convert.add_argument(
         "--template",
@@ -33,14 +35,18 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="issues_output",
         help=argparse.SUPPRESS,
     )
-    convert.add_argument("--default-visible", action="store_true", help="set visible=TRUE by default")
+    convert.add_argument(
+        "--default-visible", action="store_true", help="set visible=TRUE by default"
+    )
     convert.add_argument(
         "--inventory-mode",
         choices=("numeric", "stock"),
         default="numeric",
         help="numeric => write quantities, stock => IN_STOCK/OUT_OF_STOCK",
     )
-    convert.add_argument("--handle-prefix", default="ds-", help="prefix used for generated handles")
+    convert.add_argument(
+        "--handle-prefix", default="ds-", help="prefix used for generated handles"
+    )
 
     return parser
 

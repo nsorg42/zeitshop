@@ -12,6 +12,8 @@ DEFAULT_WIX_TEMPLATE_HEADER: tuple[str, ...] = (
     "name",
     "visible",
     "plainDescription",
+    "categorySlugs",
+    "primaryCategorySlug",
     "media",
     "mediaAltText",
     "ribbon",

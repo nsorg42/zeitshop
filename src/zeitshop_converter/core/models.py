@@ -28,6 +28,7 @@ class DiamondRecord:
 
     source_row: int
     data: Mapping[str, str]
+    source_format: str = "diamond_csv"
 
 
 @dataclass(frozen=True)
@@ -87,3 +88,40 @@ class ConversionBatch:
     @property
     def warning_count(self) -> int:
         return sum(1 for result in self.results if result.has_warnings)
+
+
+@dataclass(frozen=True)
+class InventoryUpdateResult:
+    """One Wix product row after matching against current DIAMOND inventory."""
+
+    source_row: int
+    wix_row: dict[str, str]
+    original_inventory: str
+    updated_inventory: str
+    matched: bool
+    changed: bool
+
+    @property
+    def has_errors(self) -> bool:
+        return False
+
+    @property
+    def has_warnings(self) -> bool:
+        return False
+
+
+@dataclass
+class InventoryUpdateBatch:
+    """Container for a Wix inventory update export and preview rows."""
+
+    header: list[str]
+    rows: list[dict[str, str]]
+    results: list[InventoryUpdateResult]
+
+    @property
+    def changed_count(self) -> int:
+        return sum(1 for result in self.results if result.changed)
+
+    @property
+    def matched_count(self) -> int:
+        return sum(1 for result in self.results if result.matched)
