@@ -2,26 +2,25 @@
 
 Zeitshop Converter is a local Python application that turns DIAMOND CSV exports into Wix product import CSVs.
 
-It is purpose-built for a DIAMOND-to-Wix workflow: parents export inventory rows from DIAMOND, the converter maps them into Wix's import format, and the generated CSV can be uploaded to Wix Stores.
+The converter is intentionally small: it reads DIAMOND-style `.csv` files, maps product rows into Wix's CSV structure, validates the generated product rows, and writes an optional German issue report.
 
 ## What It Does
 
-- Reads DIAMOND-style `.csv` exports
+- Reads DIAMOND `.csv` exports
 - Detects CSV encoding and delimiter automatically
 - Normalizes DIAMOND columns into a fixed internal product schema
 - Merges duplicate product rows by article number, with reference as fallback
 - Aggregates inventory when duplicate rows describe the same product
 - Maps source data into Wix `PRODUCT` rows
-- Validates required Wix fields and writes a German issue report
-- Can match products to a local full-quality DiamondSEVEN image archive
-- Can upload matched archived images to Wix Media Manager and emit Wix `MEDIA` rows
+- Validates required Wix fields
+- Writes a German issue report for errors and warnings
+- Supports both a Tkinter GUI and a CLI
 
-## Scope And Limitations
+## Scope
 
-- `.xlsx` exports and embedded Excel thumbnail extraction are no longer supported.
-- The image workflow expects a local archive downloaded from the DiamondSEVEN Data Exchange API.
-- Private customer exports, credentials, downloaded images, and large sample files are intentionally not included in this repository.
-- Back up the local image archive separately; it is not stored in git.
+- `.xlsx` exports are not supported.
+- Image extraction, image download, API access, and Wix image upload are not supported.
+- Private customer exports and large sample files are intentionally not included in this repository.
 
 ## Requirements
 
@@ -70,7 +69,6 @@ The GUI lets you:
 - edit selected product fields before export
 - download the Wix CSV
 - download a German issue report
-- configure an optional local image archive manifest and Wix credentials
 
 ### CLI
 
@@ -89,88 +87,13 @@ Useful options:
 - `--default-visible`: write `visible=TRUE`
 - `--inventory-mode stock`: write `IN_STOCK` / `OUT_OF_STOCK` instead of numeric inventory
 - `--handle-prefix ds-`: change the generated handle prefix
-- `--image-manifest path/to/manifest.csv`: match rows to the local DiamondSEVEN image archive
-- `--wix-site-id` and `--wix-api-key`: enable automatic upload of matched local images to Wix Media Manager
-- `--wix-image-path /zeitshop`: control the target folder path inside Wix Media Manager
-
-Environment variables are supported for Wix credentials:
-
-```bash
-export ZEITSHOP_WIX_SITE_ID="your-site-id"
-export ZEITSHOP_WIX_API_KEY="your-api-key"
-```
-
-Example with archived image upload:
-
-```bash
-python -m zeitshop_converter.main convert \
-  --diamond input.csv \
-  --image-manifest ~/.zeitshop_converter/diamond_images/manifest.csv \
-  --output out/wix_import.csv \
-  --issues-output out/issues.csv
-```
-
-## One-Time Image Archive
-
-During a DiamondSEVEN API trial, download full-quality article images into a local archive:
-
-```bash
-export DIAMONDSEVEN_BASE_URL="https://server.diamondseven.swiss:10555"
-export DIAMONDSEVEN_PARTNER_KEY="your-partner-key"
-
-python -m zeitshop_converter.main archive-images \
-  --output-dir ~/.zeitshop_converter/diamond_images \
-  --manifest ~/.zeitshop_converter/diamond_images/manifest.csv
-```
-
-The archive command:
-
-- calls the DiamondSEVEN `articles` export
-- attempts `webstock` enrichment for barcode metadata
-- downloads `ArticlePictures[].PictureURL`
-- stores files under `files/<article_id>/`
-- writes `manifest.csv` with article IDs, references, barcodes, source URLs, local paths, SHA-256 hashes, and byte sizes
-- skips already-downloaded files when the manifest and hash still match
-
-You can also pass credentials directly:
-
-```bash
-python -m zeitshop_converter.main archive-images \
-  --base-url https://server.diamondseven.swiss:10555 \
-  --partner-key your-partner-key \
-  --output-dir ~/.zeitshop_converter/diamond_images \
-  --manifest ~/.zeitshop_converter/diamond_images/manifest.csv
-```
-
-## Image Match Diagnostics
-
-Before using images in production, compare a current DIAMOND CSV export against the manifest:
-
-```bash
-python -m zeitshop_converter.main diagnose-image-matches \
-  --diamond input.csv \
-  --manifest ~/.zeitshop_converter/diamond_images/manifest.csv \
-  --output out/image_match_diagnostics.csv
-```
-
-Matching order:
-
-1. `Artikel Nr` equals API `ArticleId`
-2. `Artikel Nr` equals API `Reference`
-3. `Referenz` equals API `Reference`
-4. `Referenz` equals API `Barcode`
-
-Rows with no match or ambiguous matches are exported without media and appear as warnings in the issue report during conversion.
 
 ## Output Files
 
-Depending on the workflow, the converter can generate:
+The converter can generate:
 
 - a Wix import CSV with valid `PRODUCT` rows
-- additional Wix `MEDIA` rows for matched archived product images
 - a German issue report CSV containing row-level errors and warnings
-- a DiamondSEVEN image archive manifest
-- an image match diagnostic CSV
 
 ## Windows Build
 
@@ -204,7 +127,7 @@ Project layout:
 ```text
 src/zeitshop_converter/
   core/    conversion rules, normalization, validation, mapping
-  io/      CSV readers, writers, template loading, image archive/upload helpers
+  io/      CSV readers, writers, template loading
   gui/     Tkinter desktop application
   main.py  CLI and GUI entrypoint
 ```
@@ -212,5 +135,4 @@ src/zeitshop_converter/
 ## Notes
 
 - The built-in Wix template header is used unless you explicitly pass a custom template.
-- Conversion without archived image upload is fully local.
-- Image uploads require Wix credentials and network access.
+- Conversion is fully local.

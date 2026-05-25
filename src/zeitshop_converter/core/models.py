@@ -37,19 +37,6 @@ class ConversionOptions:
     default_visible: bool = False
     numeric_inventory: bool = True
     handle_prefix: str = "ds-"
-    image_archive: "ImageArchiveOptions | None" = None
-
-
-@dataclass(frozen=True)
-class ImageArchiveOptions:
-    """Optional settings for matching archived DIAMOND images and uploading them."""
-
-    enabled: bool = False
-    manifest_path: str = ""
-    wix_site_id: str = ""
-    wix_api_key: str = ""
-    wix_file_path: str = "/zeitshop"
-    max_images_per_product: int = 15
 
 
 @dataclass
@@ -59,7 +46,6 @@ class WixRowResult:
     source_row: int
     source: Mapping[str, str]
     wix_row: dict[str, str]
-    media_rows: list[dict[str, str]] = field(default_factory=list)
     issues: list[ValidationIssue] = field(default_factory=list)
 
     @property
@@ -88,13 +74,7 @@ class ConversionBatch:
 
     @property
     def valid_rows(self) -> list[dict[str, str]]:
-        rows: list[dict[str, str]] = []
-        for result in self.results:
-            if result.has_errors:
-                continue
-            rows.append(result.wix_row)
-            rows.extend(result.media_rows)
-        return rows
+        return [result.wix_row for result in self.results if not result.has_errors]
 
     @property
     def error_rows(self) -> list[WixRowResult]:

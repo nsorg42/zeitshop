@@ -6,11 +6,11 @@ from zeitshop_converter.io import diamond_reader
 from zeitshop_converter.io.diamond_reader import read_diamond_csv, read_diamond_file
 
 
-def test_reader_keeps_bild_and_drops_empty_columns(tmp_path: Path) -> None:
+def test_reader_drops_empty_columns(tmp_path: Path) -> None:
     file_path = tmp_path / "diamond.csv"
     file_path.write_text(
-        "Bild;Filiale;Kategorie;Warengruppe;Marke;;Produktlinie;Artikel Nr;Kurzbeschreibung;;Referenz;Menge;Einstand;;Verkauf\n"
-        "images/sku-1001.jpg;Store-West;Category-A;Segment-B;Brand-X;;Linea;SKU-1001;Linea;;REF-1001;1;1'775.00;;3'550.00\n",
+        "Filiale;Kategorie;Warengruppe;Marke;;Produktlinie;Artikel Nr;Kurzbeschreibung;;Referenz;Menge;Einstand;;Verkauf\n"
+        "Store-West;Category-A;Segment-B;Brand-X;;Linea;SKU-1001;Linea;;REF-1001;1;1'775.00;;3'550.00\n",
         encoding="cp1252",
     )
 
@@ -19,7 +19,6 @@ def test_reader_keeps_bild_and_drops_empty_columns(tmp_path: Path) -> None:
     assert len(records) == 1
     row = records[0]
     assert row.source_row == 2
-    assert row.data["Bild"] == "images/sku-1001.jpg"
     assert row.data["Filiale"] == "Store-West"
     assert row.data["Artikel Nr"] == "SKU-1001"
     assert row.data["Verkauf"] == "3'550.00"

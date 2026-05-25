@@ -14,7 +14,6 @@ from .detect import detect_encoding, sniff_dialect
 
 
 CANONICAL_COLUMNS = [
-    "Bild",
     "Filiale",
     "Kategorie",
     "Warengruppe",
@@ -30,7 +29,6 @@ CANONICAL_COLUMNS = [
 
 
 ALIASES: dict[str, str] = {
-    "bild": "Bild",
     "filiale": "Filiale",
     "kategorie": "Kategorie",
     "warengruppe": "Warengruppe",

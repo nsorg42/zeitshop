@@ -5,7 +5,7 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-from zeitshop_converter.core import ConversionBatch, ImageArchiveOptions, Severity, ValidationIssue, WixRowResult
+from zeitshop_converter.core import ConversionBatch, Severity, ValidationIssue, WixRowResult
 from zeitshop_converter.gui import app as gui_app
 
 
@@ -87,11 +87,6 @@ def test_save_and_load_settings_round_trip_with_normalization(
             handle_prefix="custom-",
             default_visible=False,
             output_dir="/tmp/out",
-            image_archive_enabled=True,
-            image_manifest="/tmp/manifest.csv",
-            wix_site_id="site-1",
-            wix_api_key="secret",
-            wix_image_path="/media/path",
         )
     )
 
@@ -101,48 +96,28 @@ def test_save_and_load_settings_round_trip_with_normalization(
             handle_prefix="custom-",
             default_visible=False,
             output_dir="/tmp/out",
-            image_archive_enabled=True,
-            image_manifest="/tmp/manifest.csv",
-            wix_site_id="site-1",
-            wix_api_key="secret",
-            wix_image_path="/media/path",
     )
 
     settings_path.write_text(
-        json.dumps({"handle_prefix": " ", "wix_image_path": " "}),
+        json.dumps({"handle_prefix": " "}),
         encoding="utf-8",
     )
     loaded = gui_app._load_settings()
     assert loaded.handle_prefix == "ds-"
-    assert loaded.wix_image_path == "/zeitshop"
 
 
-def test_build_options_uses_environment_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_build_options_uses_settings() -> None:
     fake_app = SimpleNamespace(
         settings=gui_app.GuiSettings(
             handle_prefix="hp-",
             default_visible=False,
-            image_archive_enabled=True,
-            image_manifest="/manifest.csv",
-            wix_site_id="",
-            wix_api_key="stored-key",
-            wix_image_path="/target",
         )
     )
-    monkeypatch.setenv("ZEITSHOP_WIX_SITE_ID", "env-site")
-    monkeypatch.setenv("ZEITSHOP_WIX_API_KEY", "env-key")
 
     options = gui_app.ConverterApp._build_options(fake_app)
 
     assert options.default_visible is False
     assert options.handle_prefix == "hp-"
-    assert options.image_archive == ImageArchiveOptions(
-        enabled=True,
-        manifest_path="/manifest.csv",
-        wix_site_id="env-site",
-        wix_api_key="stored-key",
-        wix_file_path="/target",
-    )
 
 
 def test_default_download_helpers_use_configured_and_source_paths(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -189,11 +164,9 @@ def test_report_progress_matches_search_and_sort_key() -> None:
     )
     fake_app._value_for_column = lambda result, column: gui_app.ConverterApp._value_for_column(fake_app, result, column)
 
-    gui_app.ConverterApp._report_progress(fake_app, "Bilder 2/5: Working")
-    assert fake_app.status_var.get() == "Bilder 2/5: Working"
-    assert fake_app.progress_text_var.get() == "Fortschritt: 2/5"
-    assert progressbar.config["maximum"] == 5
-    assert progressbar.config["value"] == 2
+    gui_app.ConverterApp._report_progress(fake_app, "Konvertierung läuft")
+    assert fake_app.status_var.get() == "Konvertierung läuft"
+    assert fake_app.progress_text_var.get() == "Fortschritt: läuft"
     assert idle_calls == ["idle"]
 
     result = _sample_result()
@@ -224,7 +197,6 @@ def test_value_for_column_prefers_override_and_export_rows_merge_visible_edits()
             "sku": "ART-1",
             "barcode": "REF-1",
         },
-        media_rows=[{"handle": "one", "fieldType": "MEDIA", "media": "https://example.com/pic.jpg"}],
     )
     fake_app = SimpleNamespace(
         batch=ConversionBatch(header=["handle", "fieldType"], results=[result]),
@@ -261,7 +233,7 @@ def test_value_for_column_prefers_override_and_export_rows_merge_visible_edits()
         "sku": "ART-9",
         "barcode": "REF-9",
     }
-    assert rows[1] == {"handle": "one", "fieldType": "MEDIA", "media": "https://example.com/pic.jpg"}
+    assert len(rows) == 1
 
 
 def test_build_export_rows_rejects_invalid_edited_values() -> None:
@@ -364,57 +336,15 @@ def test_finish_conversion_error_shows_exception_message(monkeypatch: pytest.Mon
 
     gui_app.ConverterApp._finish_conversion_error(
         fake_app,
-        RuntimeError("Internet nötig um Bilder automatisch hochzuladen"),
+        RuntimeError("Fehler bei der Konvertierung"),
     )
 
     assert fake_app._conversion_running is False
-    assert fake_app.status_var.get() == "Internet nötig um Bilder automatisch hochzuladen"
+    assert fake_app.status_var.get() == "Fehler bei der Konvertierung"
     assert fake_app.progressbar.config["value"] == 0
     assert fake_app.progress_text_var.get() == ""
     assert shown == [
-        ("Konvertierung fehlgeschlagen", "Internet nötig um Bilder automatisch hochzuladen")
-    ]
-
-
-def test_run_conversion_blocks_offline_wix_uploads_before_worker(monkeypatch: pytest.MonkeyPatch) -> None:
-    shown: list[tuple[str, str]] = []
-    monkeypatch.setattr(gui_app.messagebox, "showerror", lambda title, message: shown.append((title, message)))
-    monkeypatch.setattr(
-        gui_app,
-        "ensure_wix_upload_connectivity",
-        lambda: (_ for _ in ()).throw(
-            gui_app.WixUploadConnectivityError("Internet nötig um Bilder automatisch hochzuladen")
-        ),
-    )
-
-    fake_app = SimpleNamespace(
-        diamond_path=Path("/tmp/input.csv"),
-        _conversion_running=False,
-        _build_options=lambda: gui_app.ConversionOptions(
-            image_archive=gui_app.ImageArchiveOptions(
-                enabled=True,
-                manifest_path="/manifest.csv",
-                wix_site_id="site-1",
-                wix_api_key="api-1",
-            )
-        ),
-        _ensure_wix_upload_connectivity=lambda options: gui_app.ConverterApp._ensure_wix_upload_connectivity(
-            fake_app,
-            options,
-        ),
-        status_var=DummyVar(),
-        progressbar=DummyWidget(),
-        progress_text_var=DummyVar("Fortschritt: läuft"),
-    )
-
-    gui_app.ConverterApp._run_conversion(fake_app)
-
-    assert fake_app._conversion_running is False
-    assert fake_app.status_var.get() == "Internet nötig um Bilder automatisch hochzuladen"
-    assert fake_app.progressbar.config["value"] == 0
-    assert fake_app.progress_text_var.get() == ""
-    assert shown == [
-        ("Konvertierung fehlgeschlagen", "Internet nötig um Bilder automatisch hochzuladen")
+        ("Konvertierung fehlgeschlagen", "Fehler bei der Konvertierung")
     ]
 
 

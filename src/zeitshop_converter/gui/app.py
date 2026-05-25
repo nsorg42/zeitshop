@@ -4,10 +4,8 @@ from dataclasses import asdict, dataclass
 from decimal import Decimal, InvalidOperation
 import importlib
 import json
-import os
 from pathlib import Path
 import queue
-import re
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -27,17 +25,14 @@ sv_ttk = _load_sv_ttk()
 
 from ..conversion import convert_diamond_file
 from ..core.barcodes import ensure_unique_product_barcodes
-from ..core import ConversionBatch, ConversionOptions, ImageArchiveOptions, Severity, ValidationIssue
+from ..core import ConversionBatch, ConversionOptions, Severity, ValidationIssue
 from ..io import (
-    WixUploadConnectivityError,
-    ensure_wix_upload_connectivity,
     write_issue_csv,
     write_wix_csv,
 )
 from ..core.validation import validate_wix_row
 
 _SETTINGS_PATH = Path.home() / ".zeitshop_converter" / "gui_settings.json"
-_ROW_PROGRESS_RE = re.compile(r"^Bilder\s+(\d+)/(\d+):")
 _PREVIEW_TO_WIX_COLUMN = {
     "name": "name",
     "brand": "brand",
@@ -66,11 +61,6 @@ class GuiSettings:
     handle_prefix: str = "ds-"
     default_visible: bool = True
     output_dir: str = ""
-    image_archive_enabled: bool = False
-    image_manifest: str = ""
-    wix_site_id: str = ""
-    wix_api_key: str = ""
-    wix_image_path: str = "/zeitshop"
 
 
 def _load_settings() -> GuiSettings:
@@ -92,25 +82,6 @@ def _load_settings() -> GuiSettings:
 
     output_dir = str(payload.get("output_dir", settings.output_dir)).strip()
     settings.output_dir = output_dir
-
-    settings.image_archive_enabled = bool(
-        payload.get(
-            "image_archive_enabled",
-            payload.get("image_migration_enabled", settings.image_archive_enabled),
-        )
-    )
-
-    image_manifest = str(payload.get("image_manifest", settings.image_manifest)).strip()
-    settings.image_manifest = image_manifest
-
-    wix_site_id = str(payload.get("wix_site_id", settings.wix_site_id)).strip()
-    settings.wix_site_id = wix_site_id
-
-    wix_api_key = str(payload.get("wix_api_key", settings.wix_api_key)).strip()
-    settings.wix_api_key = wix_api_key
-
-    wix_image_path = str(payload.get("wix_image_path", settings.wix_image_path)).strip()
-    settings.wix_image_path = wix_image_path or "/zeitshop"
 
     return settings
 
@@ -445,13 +416,6 @@ class ConverterApp(tk.Tk):
         output_dir_var = tk.StringVar(
             value=self.settings.output_dir or "Standard: gleicher Ordner wie die Eingabedatei",
         )
-        image_archive_var = tk.BooleanVar(value=self.settings.image_archive_enabled)
-        image_manifest_var = tk.StringVar(
-            value=self.settings.image_manifest or "Kein lokales DiamondSEVEN-Bildarchiv ausgewählt",
-        )
-        wix_site_id_var = tk.StringVar(value=self.settings.wix_site_id)
-        wix_api_key_var = tk.StringVar(value=self.settings.wix_api_key)
-        wix_image_path_var = tk.StringVar(value=self.settings.wix_image_path)
 
         form = ttk.Frame(container)
         form.pack(fill="x")
@@ -488,56 +452,6 @@ class ConverterApp(tk.Tk):
         ttk.Button(folder_actions, text="Ordner wählen", command=choose_output_dir).pack(side="left")
         ttk.Button(folder_actions, text="Standard nutzen", command=reset_output_dir).pack(side="left", padx=(8, 0))
 
-        image_box = ttk.LabelFrame(form, text="Bildmigration", padding=10)
-        image_box.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(12, 0))
-        image_box.columnconfigure(0, weight=1)
-
-        ttk.Checkbutton(
-            image_box,
-            text="Produktbilder automatisch in Wix übernehmen",
-            variable=image_archive_var,
-        ).grid(row=0, column=0, columnspan=2, sticky="w")
-
-        ttk.Label(
-            image_box,
-            text=(
-                "Bilder werden aus dem lokalen DiamondSEVEN-Bildarchiv gelesen und per Wix Media Manager hochgeladen."
-            ),
-            wraplength=540,
-        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(6, 0))
-
-        ttk.Label(image_box, text="Lokales DiamondSEVEN-Bildarchiv").grid(row=2, column=0, sticky="w", pady=(12, 0))
-        ttk.Label(
-            image_box,
-            textvariable=image_manifest_var,
-            wraplength=540,
-        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(2, 0))
-
-        def choose_image_manifest() -> None:
-            selected_file = filedialog.askopenfilename(
-                title="DiamondSEVEN-Bildarchiv Manifest auswählen",
-                filetypes=(("CSV Dateien", "*.csv *.CSV"), ("Alle Dateien", "*.*")),
-            )
-            if selected_file:
-                image_manifest_var.set(selected_file)
-
-        def reset_image_manifest() -> None:
-            image_manifest_var.set("Kein lokales DiamondSEVEN-Bildarchiv ausgewählt")
-
-        manifest_actions = ttk.Frame(image_box)
-        manifest_actions.grid(row=4, column=0, sticky="w", pady=(8, 0))
-        ttk.Button(manifest_actions, text="Manifest wählen", command=choose_image_manifest).pack(side="left")
-        ttk.Button(manifest_actions, text="Entfernen", command=reset_image_manifest).pack(side="left", padx=(8, 0))
-
-        ttk.Label(image_box, text="Wix Site ID").grid(row=5, column=0, sticky="w", pady=(12, 0))
-        ttk.Entry(image_box, textvariable=wix_site_id_var, width=44).grid(row=6, column=0, sticky="w")
-
-        ttk.Label(image_box, text="Wix API Key").grid(row=7, column=0, sticky="w", pady=(12, 0))
-        ttk.Entry(image_box, textvariable=wix_api_key_var, width=44, show="*").grid(row=8, column=0, sticky="w")
-
-        ttk.Label(image_box, text="Wix Medienpfad").grid(row=9, column=0, sticky="w", pady=(12, 0))
-        ttk.Entry(image_box, textvariable=wix_image_path_var, width=44).grid(row=10, column=0, sticky="w")
-
         form.columnconfigure(0, weight=1)
 
         def on_save() -> None:
@@ -550,17 +464,6 @@ class ConverterApp(tk.Tk):
                 self.settings.output_dir = ""
             else:
                 self.settings.output_dir = output_dir_text
-
-            self.settings.image_archive_enabled = image_archive_var.get()
-            image_manifest_text = image_manifest_var.get().strip()
-            if image_manifest_text.startswith("Kein lokales"):
-                self.settings.image_manifest = ""
-            else:
-                self.settings.image_manifest = image_manifest_text
-
-            self.settings.wix_site_id = wix_site_id_var.get().strip()
-            self.settings.wix_api_key = wix_api_key_var.get().strip()
-            self.settings.wix_image_path = wix_image_path_var.get().strip() or "/zeitshop"
 
             try:
                 _save_settings(self.settings)
@@ -606,35 +509,12 @@ class ConverterApp(tk.Tk):
             default_visible=self.settings.default_visible,
             numeric_inventory=True,
             handle_prefix=self.settings.handle_prefix,
-            image_archive=ImageArchiveOptions(
-                enabled=self.settings.image_archive_enabled,
-                manifest_path=self.settings.image_manifest,
-                wix_site_id=self.settings.wix_site_id or os.environ.get("ZEITSHOP_WIX_SITE_ID", ""),
-                wix_api_key=self.settings.wix_api_key or os.environ.get("ZEITSHOP_WIX_API_KEY", ""),
-                wix_file_path=self.settings.wix_image_path,
-            ),
         )
-
-    def _ensure_wix_upload_connectivity(self, options: ConversionOptions) -> None:
-        """Stop before conversion when Wix-upload mode is enabled but the machine is offline."""
-        image_options = options.image_archive
-        if image_options is None or not image_options.enabled:
-            return
-        if not str(image_options.wix_site_id).strip() or not str(image_options.wix_api_key).strip():
-            return
-        ensure_wix_upload_connectivity()
 
     def _report_progress(self, message: str) -> None:
         """Refresh the status line while long-running work is in progress."""
         self.status_var.set(message)
-        match = _ROW_PROGRESS_RE.match(message.strip())
-        if match is not None:
-            current = max(int(match.group(1)), 0)
-            total = max(int(match.group(2)), 1)
-            self.progressbar.configure(maximum=total)
-            self.progressbar.configure(value=min(current, total))
-            self.progress_text_var.set(f"Fortschritt: {current}/{total}")
-        elif not self.progress_text_var.get():
+        if not self.progress_text_var.get():
             self.progress_text_var.set("Fortschritt: läuft")
         self.update_idletasks()
 
@@ -714,15 +594,6 @@ class ConverterApp(tk.Tk):
             return
 
         options = self._build_options()
-        try:
-            self._ensure_wix_upload_connectivity(options)
-        except WixUploadConnectivityError as exc:
-            message = str(exc).strip() or "Fehler bei der Konvertierung."
-            self.status_var.set(message)
-            self.progressbar.configure(maximum=1, value=0)
-            self.progress_text_var.set("")
-            messagebox.showerror("Konvertierung fehlgeschlagen", message)
-            return
 
         self._conversion_running = True
         self.status_var.set("Konvertierung läuft...")
@@ -736,11 +607,6 @@ class ConverterApp(tk.Tk):
                 batch = convert_diamond_file(
                     diamond_csv=self.diamond_path,
                     options=options,
-                    progress_callback=(
-                        self._report_progress_async
-                        if options.image_archive and options.image_archive.enabled
-                        else None
-                    ),
                 )
             except Exception as exc:  # pragma: no cover - GUI runtime path
                 self._conversion_events.put(("error", exc, None))
@@ -1018,7 +884,6 @@ class ConverterApp(tk.Tk):
         rows: list[dict[str, str]] = []
         errors: list[ValidationIssue] = []
         products: list[tuple[int, dict[str, str]]] = []
-        media_rows_by_source: list[tuple[int, list[dict[str, str]]]] = []
         for result in self.batch.results:
             if result.has_errors:
                 continue
@@ -1034,18 +899,11 @@ class ConverterApp(tk.Tk):
                 continue
 
             products.append((result.source_row, product_row))
-            media_rows_by_source.append((result.source_row, result.media_rows))
 
         ensure_unique_product_barcodes(products)
 
-        for (source_row, product_row), (media_source_row, media_rows) in zip(
-            products,
-            media_rows_by_source,
-            strict=False,
-        ):
-            assert source_row == media_source_row
+        for _source_row, product_row in products:
             rows.append(product_row)
-            rows.extend(media_rows)
 
         return rows, errors
 

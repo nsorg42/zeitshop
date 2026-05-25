@@ -24,7 +24,7 @@ def test_validate_wix_row_accepts_valid_product_row() -> None:
 @pytest.mark.parametrize(
     ("overrides", "field", "message"),
     [
-        ({"fieldType": "MEDIA"}, "fieldType", "fieldType must be PRODUCT for product rows."),
+        ({"fieldType": "VARIANT"}, "fieldType", "fieldType must be PRODUCT for product rows."),
         ({"name": ""}, "name", "name is required."),
         ({"name": "x" * 81}, "name", "name exceeds 80 characters."),
         ({"visible": "yes"}, "visible", "visible must be TRUE or FALSE."),

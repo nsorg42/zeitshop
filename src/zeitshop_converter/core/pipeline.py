@@ -14,30 +14,9 @@ from .models import (
 from .normalize import normalize_text, parse_decimal, parse_quantity
 from .validation import validate_wix_row
 
-_MERGE_ALLOWED_DIFFERENCE_FIELDS = frozenset({"Filiale", "Menge", "Bild"})
+_MERGE_ALLOWED_DIFFERENCE_FIELDS = frozenset({"Filiale", "Menge"})
 _MERGE_DECIMAL_FIELDS = frozenset({"Einstand", "Verkauf"})
 _MERGE_BLOCKER_FIELDS = ("Einstand", "Verkauf", "Menge")
-
-
-def _merge_image_references(existing: str | None, candidate: str | None) -> str:
-    """Merge image reference strings while keeping stable order and uniqueness."""
-
-    values: list[str] = []
-    seen: set[str] = set()
-    for raw in (existing, candidate):
-        text = normalize_text(raw)
-        if not text:
-            continue
-        for part in text.replace("|", ";").split(";"):
-            image_ref = normalize_text(part)
-            if not image_ref:
-                continue
-            key = image_ref.casefold()
-            if key in seen:
-                continue
-            seen.add(key)
-            values.append(image_ref)
-    return "; ".join(values)
 
 
 def _record_identity(record: DiamondRecord) -> str:
@@ -163,9 +142,6 @@ def _merge_compatible_rows(rows: list[DiamondRecord]) -> DiamondRecord:
             qty_total += qty
             qty_found = True
 
-        if "Bild" in row.data:
-            merged_data["Bild"] = _merge_image_references(merged_data.get("Bild"), row.data.get("Bild"))
-
     if qty_found:
         merged_data["Menge"] = str(max(qty_total, 0))
 
@@ -177,7 +153,7 @@ def _merge_records_by_identity(
 ) -> list[tuple[DiamondRecord, list[ValidationIssue]]]:
     """Merge duplicate DIAMOND rows that represent the same product.
     Rows are merged only when all stable product fields match exactly after
-    normalization. Branch/location, quantity, and image references may differ."""
+    normalization. Branch/location and quantity may differ."""
 
     grouped: dict[str, list[DiamondRecord]] = {}
     for record in records:

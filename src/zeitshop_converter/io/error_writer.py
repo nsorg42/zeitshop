@@ -14,16 +14,6 @@ _UNMERGED_IDENTITY_RE = re.compile(
 )
 _INVALID_DECIMAL_RE = re.compile(r"^invalid decimal value: (.+)$")
 _INVALID_QTY_RE = re.compile(r"^invalid quantity value: (.+)$")
-_IMAGE_REF_RE = re.compile(r"^Image reference could not be resolved: '(.+)'\.$")
-_UNSUPPORTED_IMAGE_RE = re.compile(r"^Unsupported image file type: '(.+)'\.$")
-_LOCAL_IMAGE_NO_UPLOAD_RE = re.compile(
-    r"^Local image found but Wix upload is not configured: '(.+)'\. "
-    r"Set a Wix site ID and API key to migrate local files automatically\.$"
-)
-_IMAGE_UPLOAD_FAILED_RE = re.compile(r"^Failed to upload image '(.+)' to Wix: (.+)$")
-_ARCHIVE_AMBIGUOUS_RE = re.compile(r"^Archived image match is ambiguous across ArticleIds: (.+)\.$")
-_ARCHIVE_NO_FILES_RE = re.compile(r"^Archived image match '(.+)' has no image files\.$")
-_ARCHIVE_UPLOAD_FAILED_RE = re.compile(r"^Failed to upload archived image '(.+)' to Wix: (.+)$")
 _EXACT_MESSAGE_TRANSLATIONS = {
     "fieldType must be PRODUCT for product rows.": "Der Feldtyp muss für Produktzeilen PRODUCT sein.",
     "name is required.": "Der Produktname fehlt.",
@@ -37,10 +27,6 @@ _EXACT_MESSAGE_TRANSLATIONS = {
     "cost must be numeric with <=9 whole digits and <=2 decimals.": "Einstand muss numerisch sein (max. 9 Vorkomma- und 2 Nachkommastellen).",
     "sku exceeds 40 characters.": "Die SKU ist länger als 40 Zeichen.",
     "brand exceeds 50 characters.": "Die Marke ist länger als 50 Zeichen.",
-    "No archived image matched this product.": "Kein archiviertes DiamondSEVEN-Bild passt zu diesem Produkt.",
-    "Archived image found but Wix upload is not configured.": (
-        "Archiviertes Bild gefunden, aber der Wix-Upload ist nicht konfiguriert."
-    ),
 }
 
 
@@ -86,37 +72,6 @@ def _message_de(issue: ValidationIssue) -> str:
     match = _INVALID_QTY_RE.match(message)
     if match:
         return f"Ungültiger Mengenwert: {match.group(1)}"
-
-    match = _IMAGE_REF_RE.match(message)
-    if match:
-        return f"Bildreferenz konnte nicht aufgelöst werden: '{match.group(1)}'."
-
-    match = _UNSUPPORTED_IMAGE_RE.match(message)
-    if match:
-        return f"Nicht unterstützter Bildtyp: '{match.group(1)}'."
-
-    match = _LOCAL_IMAGE_NO_UPLOAD_RE.match(message)
-    if match:
-        return (
-            f"Lokales Bild gefunden, aber der Wix-Upload ist nicht konfiguriert: "
-            f"'{match.group(1)}'."
-        )
-
-    match = _IMAGE_UPLOAD_FAILED_RE.match(message)
-    if match:
-        return f"Bild-Upload nach Wix fehlgeschlagen ({match.group(1)}): {match.group(2)}"
-
-    match = _ARCHIVE_AMBIGUOUS_RE.match(message)
-    if match:
-        return f"Archiviertes Bild ist nicht eindeutig zuordenbar. ArticleIds: {match.group(1)}."
-
-    match = _ARCHIVE_NO_FILES_RE.match(message)
-    if match:
-        return f"Archivierter Bildtreffer '{match.group(1)}' enthält keine Bilddateien."
-
-    match = _ARCHIVE_UPLOAD_FAILED_RE.match(message)
-    if match:
-        return f"Archivierter Bild-Upload nach Wix fehlgeschlagen ({match.group(1)}): {match.group(2)}"
 
     return message
 

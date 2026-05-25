@@ -16,13 +16,6 @@ from zeitshop_converter.io import error_writer
         ("Duplicate handle detected. Auto-adjusted to 'ds-ab-2'.", "Doppelter Handle erkannt. Automatisch angepasst zu 'ds-ab-2'."),
         ("invalid decimal value: 'abc'", "Ungültiger Dezimalwert: 'abc'"),
         ("invalid quantity value: '1.5'", "Ungültiger Mengenwert: '1.5'"),
-        ("Image reference could not be resolved: 'missing.jpg'.", "Bildreferenz konnte nicht aufgelöst werden: 'missing.jpg'."),
-        ("Unsupported image file type: 'file.txt'.", "Nicht unterstützter Bildtyp: 'file.txt'."),
-        (
-            "Local image found but Wix upload is not configured: 'local.jpg'. Set a Wix site ID and API key to migrate local files automatically.",
-            "Lokales Bild gefunden, aber der Wix-Upload ist nicht konfiguriert: 'local.jpg'.",
-        ),
-        ("Failed to upload image 'pic.jpg' to Wix: boom", "Bild-Upload nach Wix fehlgeschlagen (pic.jpg): boom"),
         ("some unknown message", "some unknown message"),
     ],
 )
@@ -53,14 +46,7 @@ def test_write_issue_csv_writes_all_issues_with_translated_messages(tmp_path: Pa
             source_row=3,
             source={"Referenz": "REF-3"},
             wix_row={},
-            issues=[
-                ValidationIssue(
-                    source_row=3,
-                    field="media",
-                    severity=Severity.WARNING,
-                    message="Failed to upload image 'ref3.jpg' to Wix: boom",
-                )
-            ],
+            issues=[ValidationIssue(source_row=3, field="brand", severity=Severity.WARNING, message="unknown")],
         ),
     ]
 
@@ -79,8 +65,8 @@ def test_write_issue_csv_writes_all_issues_with_translated_messages(tmp_path: Pa
     assert rows[1]["problem_schwere"] == "Warnung"
     assert "Doppelter Handle erkannt." in rows[1]["problem"]
     assert rows[2]["Referenz"] == "REF-3"
-    assert rows[2]["problem_feld"] == "media"
-    assert "Bild-Upload nach Wix fehlgeschlagen" in rows[2]["problem"]
+    assert rows[2]["problem_feld"] == "brand"
+    assert rows[2]["problem"] == "unknown"
 
 
 def test_write_error_csv_is_alias_for_issue_writer(tmp_path: Path) -> None:
