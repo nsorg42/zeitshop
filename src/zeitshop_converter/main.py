@@ -6,6 +6,7 @@ import sys
 from .conversion import convert_diamond_file
 from .core import ConversionOptions
 from .gui import run_gui
+from .inventory_update import build_inventory_update_batch
 from .io import write_error_csv, write_wix_csv
 
 
@@ -48,6 +49,23 @@ def _build_parser() -> argparse.ArgumentParser:
         "--handle-prefix", default="ds-", help="prefix used for generated handles"
     )
 
+    update = sub.add_parser(
+        "update",
+        aliases=["update-inventory"],
+        help="update a Wix export CSV with current DIAMOND inventory",
+    )
+    update.add_argument(
+        "--wix-export",
+        required=True,
+        help="path to the Wix product export CSV to update",
+    )
+    update.add_argument(
+        "--diamond",
+        required=True,
+        help="path to current DIAMOND inventory CSV",
+    )
+    update.add_argument("--output", required=True, help="path for updated Wix CSV")
+
     return parser
 
 
@@ -80,6 +98,23 @@ def _run_convert(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_update(args: argparse.Namespace) -> int:
+    """Execute CLI inventory-update mode and write the updated Wix export."""
+
+    batch = build_inventory_update_batch(
+        wix_export_csv=args.wix_export,
+        diamond_csv=args.diamond,
+    )
+    output_rows = write_wix_csv(args.output, batch.header, batch.rows)
+
+    print(f"Wix rows written: {output_rows}")
+    print(f"Product rows checked: {len(batch.results)}")
+    print(f"Matched products: {batch.matched_count}")
+    print(f"Changed products: {batch.changed_count}")
+
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Program entrypoint used by `python -m` and console scripts."""
     parser = _build_parser()
@@ -91,6 +126,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "convert":
         return _run_convert(args)
+
+    if args.command in ("update", "update-inventory"):
+        return _run_update(args)
 
     parser.print_help()
     return 1

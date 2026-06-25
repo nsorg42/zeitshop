@@ -2,7 +2,7 @@
 
 Zeitshop Converter is a local Python application that turns DIAMOND CSV exports into Wix product import CSVs.
 
-The converter is intentionally small: it reads DIAMOND-style `.csv` files, maps product rows into Wix's CSV structure, validates the generated product rows, and writes an optional German issue report.
+The converter is intentionally small: it reads DIAMOND-style `.csv` files, maps product rows into Wix's CSV structure, validates the generated product rows, writes an optional German issue report, and can update inventory in an existing Wix export from a newer DIAMOND inventory CSV.
 
 ## What It Does
 
@@ -14,6 +14,7 @@ The converter is intentionally small: it reads DIAMOND-style `.csv` files, maps 
 - Maps source data into Wix `PRODUCT` rows
 - Validates required Wix fields
 - Writes a German issue report for errors and warnings
+- Updates inventory in an existing Wix product export from a newer DIAMOND inventory export
 - Supports both a Tkinter GUI and a CLI
 
 ## Scope
@@ -69,6 +70,7 @@ The GUI lets you:
 - edit selected product fields before export
 - download the Wix CSV
 - download a German issue report
+- switch to update mode, choose a Wix product export plus a newer DIAMOND inventory CSV, and save the updated Wix CSV
 
 ### CLI
 
@@ -88,6 +90,17 @@ Useful options:
 - `--inventory-mode stock`: write `IN_STOCK` / `OUT_OF_STOCK` instead of numeric inventory
 - `--handle-prefix ds-`: change the generated handle prefix
 
+Update a Wix product export with a newer DIAMOND inventory CSV:
+
+```bash
+python -m zeitshop_converter.main update \
+  --wix-export catalog_products.csv \
+  --diamond lager.csv \
+  --output out/catalog_products_inventory_update.csv
+```
+
+The command also updates the store availability sentence in `plainDescription` when the Wix export contains that column.
+
 ## Output Files
 
 The converter can generate:
@@ -95,7 +108,28 @@ The converter can generate:
 - a Wix import CSV with valid `PRODUCT` rows
 - a German issue report CSV containing row-level errors and warnings
 
-## Windows Build
+## Windows Installation
+
+For a normal Windows computer with Python 3.10 or newer installed, run this from the repository folder:
+
+```bat
+scripts\install_windows.cmd
+```
+
+The installer creates:
+
+- `%LOCALAPPDATA%\ZeitshopConverter\`
+- a desktop shortcut named `Zeitshop Converter`
+- a Start Menu shortcut named `Zeitshop Converter`
+- a CLI launcher at `%LOCALAPPDATA%\ZeitshopConverter\bin\zeitshop-converter.cmd`
+
+To remove the installed app:
+
+```bat
+scripts\uninstall_windows.cmd
+```
+
+## Portable Windows Build
 
 To package the GUI as a Windows desktop app:
 

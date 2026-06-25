@@ -1,16 +1,24 @@
 from __future__ import annotations
 
 import csv
+from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
 
 from .core import InventoryUpdateBatch, InventoryUpdateResult
+from .core.mapping import merge_availability_into_description
 from .core.normalize import normalize_text, parse_quantity
 from .io import read_diamond_file
 from .io.detect import detect_encoding
 
 
 _REQUIRED_WIX_EXPORT_COLUMNS = {"inventory", "sku"}
+
+
+@dataclass(frozen=True)
+class _DiamondInventorySnapshot:
+    inventory: str
+    branches: tuple[str, ...]
 
 
 def _read_wix_export_rows(path: str | Path) -> tuple[list[str], list[dict[str, str]]]:
@@ -39,8 +47,9 @@ def _read_wix_export_rows(path: str | Path) -> tuple[list[str], list[dict[str, s
     return header, rows
 
 
-def _inventory_by_artikel_nr(diamond_csv: str | Path) -> dict[str, str]:
+def _inventory_by_artikel_nr(diamond_csv: str | Path) -> dict[str, _DiamondInventorySnapshot]:
     inventory: dict[str, int] = {}
+    branches_by_artikel_nr: dict[str, list[str]] = {}
     for record in read_diamond_file(diamond_csv):
         artikel_nr = normalize_text(record.data.get("Artikel Nr"))
         if not artikel_nr:
@@ -53,9 +62,22 @@ def _inventory_by_artikel_nr(diamond_csv: str | Path) -> dict[str, str]:
                 f"Ungültige Menge in Lagerdatei bei Artikel Nr '{artikel_nr}' (Zeile {record.source_row})."
             ) from exc
 
-        inventory[artikel_nr] = inventory.get(artikel_nr, 0) + (qty or 0)
+        quantity = qty or 0
+        inventory[artikel_nr] = inventory.get(artikel_nr, 0) + quantity
+        if quantity > 0:
+            branch = normalize_text(record.data.get("Filiale"))
+            if branch:
+                current_branches = branches_by_artikel_nr.setdefault(artikel_nr, [])
+                if branch not in current_branches:
+                    current_branches.append(branch)
 
-    return {artikel_nr: str(max(quantity, 0)) for artikel_nr, quantity in inventory.items()}
+    return {
+        artikel_nr: _DiamondInventorySnapshot(
+            inventory=str(max(quantity, 0)),
+            branches=tuple(branches_by_artikel_nr.get(artikel_nr, [])),
+        )
+        for artikel_nr, quantity in inventory.items()
+    }
 
 
 def build_inventory_update_batch(
@@ -76,12 +98,21 @@ def build_inventory_update_batch(
         field_type = normalize_text(row.get("fieldType")).upper()
         sku = normalize_text(row.get("sku"))
         old_inventory = normalize_text(row.get("inventory"))
+        old_description = row.get("plainDescription", "")
         is_product = not field_type or field_type == "PRODUCT"
         matched = bool(is_product and sku and sku in inventory_by_sku)
-        new_inventory = inventory_by_sku.get(sku, old_inventory) if matched else old_inventory
+        snapshot = inventory_by_sku.get(sku)
+        new_inventory = snapshot.inventory if matched and snapshot is not None else old_inventory
+        new_description = old_description
 
         if matched:
             row["inventory"] = new_inventory
+            if snapshot is not None and "plainDescription" in row:
+                new_description = merge_availability_into_description(
+                    old_description,
+                    snapshot.branches,
+                )
+                row["plainDescription"] = new_description
 
         updated_rows.append(row)
 
@@ -93,7 +124,8 @@ def build_inventory_update_batch(
                     original_inventory=old_inventory,
                     updated_inventory=new_inventory,
                     matched=matched,
-                    changed=matched and new_inventory != old_inventory,
+                    changed=matched
+                    and (new_inventory != old_inventory or new_description != old_description),
                 )
             )
 

@@ -219,6 +219,31 @@ def test_pipeline_pluralizes_ring_category() -> None:
     assert batch.valid_rows[0]["categorySlugs"] == "schmuck;ringe;brand"
 
 
+def test_pipeline_preserves_eichmueller_brand_category_label() -> None:
+    records = [
+        DiamondRecord(
+            source_row=2,
+            data={
+                "Artikel Nr": "123",
+                "Referenz": "R-1",
+                "Marke": "Eichmüller",
+                "Produktlinie": "Line",
+                "Kurzbeschreibung": "",
+                "Verkauf": "99",
+                "Einstand": "40.50",
+                "Menge": "3",
+                "Warengruppe": "Wecker",
+                "Kategorie": "Uhr",
+            },
+        )
+    ]
+
+    batch = convert_records(records, _template_header(), ConversionOptions())
+
+    assert batch.valid_rows[0]["primaryCategorySlug"] == "uhren"
+    assert batch.valid_rows[0]["categorySlugs"] == "uhren;wecker;eichmüller"
+
+
 def test_pipeline_merges_duplicate_article_numbers_when_only_branch_and_quantity_differ() -> None:
     records = [
         DiamondRecord(

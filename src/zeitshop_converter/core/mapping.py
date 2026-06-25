@@ -7,6 +7,17 @@ from .models import ConversionOptions, DiamondRecord, Severity, ValidationIssue
 from .normalize import format_decimal, make_handle, normalize_inventory, normalize_text, parse_decimal
 
 _WORD_RE = re.compile(r"[^\W_]+", flags=re.UNICODE)
+_AM_BOGEN_AVAILABILITY = "Verfügbar in dem Ladengeschäft Bijouterie Am Bogen in Bremgarten AG"
+_DROZ_AVAILABILITY = "Verfügbar in dem Ladengeschäft Bijouterie Droz in Zofingen AG"
+_BOTH_BRANCHES_AVAILABILITY = (
+    "Verfügbar in den Ladengeschäften Bijouterie Am Bogen in Bremgarten AG "
+    "und in der Bijouterie Droz in Zofingen AG"
+)
+_KNOWN_AVAILABILITY_SENTENCES = (
+    _AM_BOGEN_AVAILABILITY,
+    _DROZ_AVAILABILITY,
+    _BOTH_BRANCHES_AVAILABILITY,
+)
 def _tokens_equal(left: str, right: str) -> bool:
     """Case-insensitive token comparison with simple plural handling."""
     a = left.casefold()
@@ -119,20 +130,10 @@ def _build_plain_description(record: DiamondRecord) -> str:
             items.append(f"Referenz: {referenz}")
 
         branch_names = [normalize_text(part) for part in record.data.get("Filiale", "").split("|")]
-        branches = [branch for branch in branch_names if branch]
-        if branches == ["Am Bogen"]:
-            items.append("Verfügbar in dem Ladengeschäft Bijouterie Am Bogen in Bremgarten AG")
-            return "\n".join(items)
-        if branches == ["Droz"]:
-            items.append("Verfügbar in dem Ladengeschäft Bijouterie Droz in Zofingen AG")
-            return "\n".join(items)
-        if set(branches) == {"Am Bogen", "Droz"}:
-            items.append(
-                "Verfügbar in den Ladengeschäften Bijouterie Am Bogen in Bremgarten AG "
-                "und in der Bijouterie Droz in Zofingen AG"
-            )
-            return "\n".join(items)
-        return ""
+        availability = availability_sentence_from_branches(branch_names)
+        if availability:
+            items.append(availability)
+        return "\n".join(items)
 
     items: list[str] = []
     warengruppe = _normalize_category_text(record.data.get("Warengruppe"))
@@ -192,12 +193,67 @@ def _category_slugs_for_value(value: str | None) -> list[str]:
     return [slug] if slug else []
 
 
+def _brand_category_slug(value: str | None) -> str:
+    """Build the brand category slug, preserving specific Wix-facing labels."""
+    brand = normalize_text(value)
+    if not brand:
+        return ""
+    if brand == "Eichmüller":
+        return "eichmüller"
+    return make_handle(brand, prefix="")
+
+
+def availability_sentence_from_branches(branches: Sequence[str]) -> str:
+    """Build the storefront availability sentence from current branch stock."""
+    seen: list[str] = []
+    for raw_branch in branches:
+        branch = normalize_text(raw_branch)
+        if branch in {"Am Bogen", "Droz"} and branch not in seen:
+            seen.append(branch)
+
+    if seen == ["Am Bogen"]:
+        return _AM_BOGEN_AVAILABILITY
+    if seen == ["Droz"]:
+        return _DROZ_AVAILABILITY
+    if set(seen) == {"Am Bogen", "Droz"}:
+        return _BOTH_BRANCHES_AVAILABILITY
+    return ""
+
+
+def merge_availability_into_description(description: str | None, branches: Sequence[str]) -> str:
+    """Replace the availability tail in a Wix description while preserving prior text."""
+    text = (description or "").strip()
+    base = text
+
+    changed = True
+    while changed:
+        changed = False
+        for sentence in _KNOWN_AVAILABILITY_SENTENCES:
+            if base == sentence:
+                base = ""
+                changed = True
+                break
+            for separator in ("\n", " | "):
+                suffix = f"{separator}{sentence}"
+                if base.endswith(suffix):
+                    base = base[: -len(suffix)].rstrip()
+                    changed = True
+                    break
+            if changed:
+                break
+
+    availability = availability_sentence_from_branches(branches)
+    if base and availability:
+        return f"{base}\n{availability}"
+    return availability or base
+
+
 def _build_category_slugs(record: DiamondRecord) -> tuple[str, str]:
     """Build Wix category slug fields from DIAMOND category values."""
     broad_slugs = _category_slugs_for_value(record.data.get("Kategorie"))
     broad = broad_slugs[0] if broad_slugs else ""
     fine_slugs = _category_slugs_for_value(record.data.get("Warengruppe"))
-    brand = make_handle(normalize_text(record.data.get("Marke")), prefix="")
+    brand = _brand_category_slug(record.data.get("Marke"))
 
     slugs: list[str] = []
     for slug in [*broad_slugs, *fine_slugs, brand]:

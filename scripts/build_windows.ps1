@@ -8,22 +8,49 @@ $distDir = Join-Path $repoRoot "dist"
 $appDir = Join-Path $distDir "ZeitshopConverter"
 $artifactPath = Join-Path $distDir "ZeitshopConverter-windows.zip"
 
-function New-BuildVenv {
-    if (Get-Command py -ErrorAction SilentlyContinue) {
-        & py -3 -m venv $venvPath
-        return
+function Find-Python310 {
+    $candidates = @(
+        @("py", "-3.12"),
+        @("py", "-3.11"),
+        @("py", "-3.10"),
+        @("py", "-3"),
+        @("python")
+    )
+
+    foreach ($candidate in $candidates) {
+        $command = $candidate[0]
+        if (-not (Get-Command $command -ErrorAction SilentlyContinue)) {
+            continue
+        }
+
+        $candidateArgs = @()
+        if ($candidate.Count -gt 1) {
+            $candidateArgs = $candidate[1..($candidate.Count - 1)]
+        }
+
+        & $command @candidateArgs -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            return @{ Command = $command; Args = $candidateArgs }
+        }
     }
 
-    if (Get-Command python -ErrorAction SilentlyContinue) {
-        & python -m venv $venvPath
-        return
-    }
-
-    throw "Python 3.10+ was not found. Install Python first."
+    throw "Python 3.10 or newer was not found. Install Python first."
 }
 
-if (-not (Test-Path $pythonExe)) {
-    New-BuildVenv
+$createVenv = $true
+if (Test-Path $pythonExe) {
+    & $pythonExe -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" 2>$null
+    $createVenv = $LASTEXITCODE -ne 0
+}
+
+if ($createVenv) {
+    if (Test-Path $venvPath) {
+        Remove-Item -Recurse -Force $venvPath
+    }
+    $python = Find-Python310
+    $pythonCommand = $python["Command"]
+    $pythonArgs = $python["Args"]
+    & $pythonCommand @pythonArgs -m venv $venvPath
 }
 
 Push-Location $repoRoot

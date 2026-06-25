@@ -2,7 +2,14 @@ from pathlib import Path
 
 import pytest
 
-from zeitshop_converter.core import ConversionBatch, Severity, ValidationIssue, WixRowResult
+from zeitshop_converter.core import (
+    ConversionBatch,
+    InventoryUpdateBatch,
+    InventoryUpdateResult,
+    Severity,
+    ValidationIssue,
+    WixRowResult,
+)
 from zeitshop_converter.main import _build_parser, _run_convert
 from zeitshop_converter import main as main_module
 
@@ -47,6 +54,39 @@ def test_build_parser_sets_expected_defaults() -> None:
     assert args.issues_output is None
 
 
+def test_build_parser_accepts_update_command_and_alias() -> None:
+    parser = _build_parser()
+
+    args = parser.parse_args(
+        [
+            "update",
+            "--wix-export",
+            "catalog_products.csv",
+            "--diamond",
+            "lager.csv",
+            "--output",
+            "updated.csv",
+        ]
+    )
+    alias_args = parser.parse_args(
+        [
+            "update-inventory",
+            "--wix-export",
+            "catalog_products.csv",
+            "--diamond",
+            "lager.csv",
+            "--output",
+            "updated.csv",
+        ]
+    )
+
+    assert args.command == "update"
+    assert args.wix_export == "catalog_products.csv"
+    assert args.diamond == "lager.csv"
+    assert args.output == "updated.csv"
+    assert alias_args.command == "update-inventory"
+
+
 def test_main_runs_gui_for_default_and_gui_subcommand(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
     monkeypatch.setattr(main_module, "run_gui", lambda: calls.append("gui"))
@@ -60,6 +100,25 @@ def test_main_dispatches_convert_subcommand(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(main_module, "_run_convert", lambda args: 7)
 
     assert main_module.main(["convert", "--diamond", "input.csv", "--output", "out.csv"]) == 7
+
+
+def test_main_dispatches_update_subcommand(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(main_module, "_run_update", lambda args: 8)
+
+    assert (
+        main_module.main(
+            [
+                "update",
+                "--wix-export",
+                "catalog_products.csv",
+                "--diamond",
+                "lager.csv",
+                "--output",
+                "updated.csv",
+            ]
+        )
+        == 8
+    )
 
 
 def test_run_convert_writes_outputs(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
@@ -130,3 +189,64 @@ def test_run_convert_skips_issue_writer_without_issues_output(monkeypatch: pytes
 
     args = _build_parser().parse_args(["convert", "--diamond", "input.csv", "--output", "out.csv"])
     assert _run_convert(args) == 0
+
+
+def test_run_update_writes_updated_wix_export(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    batch = InventoryUpdateBatch(
+        header=["sku", "inventory"],
+        rows=[{"sku": "A1", "inventory": "3"}],
+        results=[
+            InventoryUpdateResult(
+                source_row=2,
+                wix_row={"sku": "A1", "inventory": "3"},
+                original_inventory="1",
+                updated_inventory="3",
+                matched=True,
+                changed=True,
+            )
+        ],
+    )
+    captured: dict[str, object] = {}
+    written: dict[str, object] = {}
+
+    def fake_build_inventory_update_batch(*, wix_export_csv, diamond_csv):
+        captured["wix_export_csv"] = wix_export_csv
+        captured["diamond_csv"] = diamond_csv
+        return batch
+
+    def fake_write_wix_csv(path, header, rows):
+        written["wix"] = (path, list(header), list(rows))
+        return len(rows)
+
+    monkeypatch.setattr(
+        main_module,
+        "build_inventory_update_batch",
+        fake_build_inventory_update_batch,
+    )
+    monkeypatch.setattr(main_module, "write_wix_csv", fake_write_wix_csv)
+
+    args = _build_parser().parse_args(
+        [
+            "update",
+            "--wix-export",
+            "catalog_products.csv",
+            "--diamond",
+            "lager.csv",
+            "--output",
+            "updated.csv",
+        ]
+    )
+
+    assert main_module._run_update(args) == 0
+    assert captured == {
+        "wix_export_csv": "catalog_products.csv",
+        "diamond_csv": "lager.csv",
+    }
+    assert written["wix"] == (
+        "updated.csv",
+        ["sku", "inventory"],
+        [{"sku": "A1", "inventory": "3"}],
+    )
+    output = capsys.readouterr().out
+    assert "Matched products: 1" in output
+    assert "Changed products: 1" in output
