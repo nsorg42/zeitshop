@@ -3,9 +3,17 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 import re
-from typing import Sequence
+from typing import Mapping, Protocol, Sequence
 
 from ..core.models import Severity, ValidationIssue, WixRowResult
+
+
+class IssueReportRow(Protocol):
+    """Shared shape for conversion and update issue report rows."""
+
+    source_row: int
+    source: Mapping[str, str]
+    issues: list[ValidationIssue]
 
 _DUP_HANDLE_RE = re.compile(r"^Duplicate handle detected\. Auto-adjusted to '(.+)'\.$")
 _DUP_SKU_RE = re.compile(r"^Duplicate SKU detected: '(.+)'\.$")
@@ -76,7 +84,7 @@ def _message_de(issue: ValidationIssue) -> str:
     return message
 
 
-def write_issue_csv(path: str | Path, issue_rows: Sequence[WixRowResult]) -> int:
+def write_issue_csv(path: str | Path, issue_rows: Sequence[IssueReportRow]) -> int:
     """Write a German issue report with one output row per concrete issue.
 
     Each line keeps the source data columns first (problematische Zeile) and

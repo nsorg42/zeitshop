@@ -7,17 +7,29 @@ from .models import ConversionOptions, DiamondRecord, Severity, ValidationIssue
 from .normalize import format_decimal, make_handle, normalize_inventory, normalize_text, parse_decimal
 
 _WORD_RE = re.compile(r"[^\W_]+", flags=re.UNICODE)
-_AM_BOGEN_AVAILABILITY = "Verfügbar in dem Ladengeschäft Bijouterie Am Bogen in Bremgarten AG"
-_DROZ_AVAILABILITY = "Verfügbar in dem Ladengeschäft Bijouterie Droz in Zofingen AG"
+_AM_BOGEN_AVAILABILITY = "Verfügbar in der Bijouterie am Bogen in Bremgarten AG"
+_DROZ_AVAILABILITY = "Verfügbar in der Bijouterie Droz in Zofingen AG"
 _BOTH_BRANCHES_AVAILABILITY = (
-    "Verfügbar in den Ladengeschäften Bijouterie Am Bogen in Bremgarten AG "
+    "Verfügbar in der Bijouterie am Bogen in Bremgarten AG "
     "und in der Bijouterie Droz in Zofingen AG"
 )
 _KNOWN_AVAILABILITY_SENTENCES = (
     _AM_BOGEN_AVAILABILITY,
     _DROZ_AVAILABILITY,
     _BOTH_BRANCHES_AVAILABILITY,
+    "Verfügbar in dem Ladengeschäft Bijouterie am Bogen in Bremgarten AG",
+    "Verfügbar in dem Ladengeschäft Bijouterie Droz in Zofingen AG",
+    (
+        "Verfügbar in den Ladengeschäften Bijouterie Am Bogen in Bremgarten AG "
+        "und in der Bijouterie Droz in Zofingen AG"
+    ),
 )
+_HTML_CLOSING_PARAGRAPH_RE = re.compile(
+    r"(?P<closing>\s*</p>\s*)$", flags=re.IGNORECASE
+)
+_HTML_BREAK_TAIL_RE = re.compile(r"(?P<br>\s*<br\s*/?>\s*)$", flags=re.IGNORECASE)
+
+
 def _tokens_equal(left: str, right: str) -> bool:
     """Case-insensitive token comparison with simple plural handling."""
     a = left.casefold()
@@ -207,8 +219,8 @@ def availability_sentence_from_branches(branches: Sequence[str]) -> str:
     """Build the storefront availability sentence from current branch stock."""
     seen: list[str] = []
     for raw_branch in branches:
-        branch = normalize_text(raw_branch)
-        if branch in {"Am Bogen", "Droz"} and branch not in seen:
+        branch = _branch_key(raw_branch)
+        if branch and branch not in seen:
             seen.append(branch)
 
     if seen == ["Am Bogen"]:
@@ -220,31 +232,67 @@ def availability_sentence_from_branches(branches: Sequence[str]) -> str:
     return ""
 
 
-def merge_availability_into_description(description: str | None, branches: Sequence[str]) -> str:
-    """Replace the availability tail in a Wix description while preserving prior text."""
-    text = (description or "").strip()
-    base = text
+def _branch_key(value: str | None) -> str:
+    """Map DIAMOND branch labels to the two storefront availability locations."""
+    branch = normalize_text(value).casefold()
+    if "bogen" in branch:
+        return "Am Bogen"
+    if "droz" in branch:
+        return "Droz"
+    return ""
 
+
+def _remove_availability_tail(text: str) -> str:
+    """Remove any known availability sentence at the end of a description."""
+    base = text.rstrip()
     changed = True
     while changed:
         changed = False
         for sentence in _KNOWN_AVAILABILITY_SENTENCES:
-            if base == sentence:
+            if base.casefold() == sentence.casefold():
                 base = ""
                 changed = True
                 break
-            for separator in ("\n", " | "):
-                suffix = f"{separator}{sentence}"
-                if base.endswith(suffix):
-                    base = base[: -len(suffix)].rstrip()
-                    changed = True
-                    break
-            if changed:
+
+            pattern = re.compile(
+                rf"(?is)(?:\s*(?:<br\s*/?>|\||\n)\s*)?{re.escape(sentence)}\s*$"
+            )
+            updated = pattern.sub("", base).rstrip()
+            if updated != base:
+                base = updated
+                changed = True
                 break
+    return base
+
+
+def merge_availability_into_description(description: str | None, branches: Sequence[str]) -> str:
+    """Replace the availability tail in a Wix description while preserving prior text."""
+    text = (description or "").strip()
+    base = text
+    html_closing = ""
+
+    closing_match = _HTML_CLOSING_PARAGRAPH_RE.search(base)
+    if closing_match is not None:
+        html_closing = closing_match.group("closing")
+        base = base[: closing_match.start()].rstrip()
+
+    base = _remove_availability_tail(base)
+    base = _HTML_BREAK_TAIL_RE.sub("", base).rstrip()
+
+    if html_closing:
+        availability = availability_sentence_from_branches(branches)
+        if base and availability:
+            return f"{base}<br>{availability}{html_closing}"
+        return f"{availability}{html_closing}" if availability else f"{base}{html_closing}"
 
     availability = availability_sentence_from_branches(branches)
     if base and availability:
+        if re.search(r"<br\s*/?>\s*$", base, flags=re.IGNORECASE):
+            return f"{base}{availability}"
+        if "<br" in base.casefold():
+            return f"{base}<br>{availability}"
         return f"{base}\n{availability}"
+
     return availability or base
 
 

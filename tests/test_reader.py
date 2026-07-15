@@ -62,6 +62,24 @@ def test_reader_skips_repeated_header_rows_in_csv(tmp_path: Path) -> None:
     assert records[0].data["Artikel Nr"] == "10"
 
 
+def test_reader_maps_columntextbox_export_by_position(tmp_path: Path) -> None:
+    file_path = tmp_path / "diamond.csv"
+    file_path.write_text(
+        "ColumnTextBox1;ColumnTextBox2;ColumnTextBox3;ColumnTextBox4;ColumnTextBox5;ColumnTextBox6;ColumnTextBox7;ColumnTextBox8;ColumnTextBox9;ColumnTextBox10;ColumnTextBox11\n"
+        "Am Bogen;Schmuck;Beads & Charms;Thomas Sabo;Charm Club;111819;Charm Flügel;0613-001-12;1;21.15;55.00\n",
+        encoding="cp1252",
+    )
+
+    records = read_diamond_csv(file_path)
+
+    assert len(records) == 1
+    assert records[0].data["Filiale"] == "Am Bogen"
+    assert records[0].data["Artikel Nr"] == "111819"
+    assert records[0].data["Kurzbeschreibung"] == "Charm Flügel"
+    assert records[0].data["Menge"] == "1"
+    assert records[0].data["Verkauf"] == "55.00"
+
+
 def test_reader_rejects_unsupported_file_extension(tmp_path: Path) -> None:
     file_path = tmp_path / "diamond.xlsx"
     file_path.write_text("test", encoding="utf-8")

@@ -105,12 +105,21 @@ def _run_update(args: argparse.Namespace) -> int:
         wix_export_csv=args.wix_export,
         diamond_csv=args.diamond,
     )
+    if batch.has_blocking_errors:
+        print("Inventory update blocked by safety errors.")
+        print(f"Rows with errors: {batch.error_count}")
+        print(f"Rows with warnings: {batch.warning_count}")
+        return 1
+
     output_rows = write_wix_csv(args.output, batch.header, batch.rows)
 
     print(f"Wix rows written: {output_rows}")
     print(f"Product rows checked: {len(batch.results)}")
     print(f"Matched products: {batch.matched_count}")
+    print(f"Products set to zero: {batch.set_to_zero_count}")
+    print(f"New products: {batch.new_product_count}")
     print(f"Changed products: {batch.changed_count}")
+    print(f"Unmatched DIAMOND rows: {batch.unmatched_diamond_count}")
 
     return 0
 

@@ -5,7 +5,15 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-from zeitshop_converter.core import ConversionBatch, InventoryUpdateBatch, InventoryUpdateResult, Severity, ValidationIssue, WixRowResult
+from zeitshop_converter.core import (
+    ConversionBatch,
+    InventoryUpdateBatch,
+    InventoryUpdateIssueRow,
+    InventoryUpdateResult,
+    Severity,
+    ValidationIssue,
+    WixRowResult,
+)
 from zeitshop_converter.gui import app as gui_app
 from zeitshop_converter.io import ReportDescriptionRecord
 
@@ -369,7 +377,7 @@ def test_apply_report_descriptions_prepends_description_to_existing_availability
         source_row=4,
         source={"Artikel Nr": "ART-4", "Referenz": "REF-4"},
         wix_row={
-            "plainDescription": "Verfügbar in dem Ladengeschäft Bijouterie Am Bogen in Bremgarten AG",
+            "plainDescription": "Verfügbar in der Bijouterie am Bogen in Bremgarten AG",
             "barcode": "REF-4",
         },
     )
@@ -402,7 +410,7 @@ def test_apply_report_descriptions_prepends_description_to_existing_availability
     assert matched == 1
     assert fake_app._preview_overrides == {
         4: {
-            "plain_description": "Specs 4\nVerfügbar in dem Ladengeschäft Bijouterie Am Bogen in Bremgarten AG"
+            "plain_description": "Specs 4\nVerfügbar in der Bijouterie am Bogen in Bremgarten AG"
         }
     }
 
@@ -431,6 +439,243 @@ def test_build_export_rows_returns_update_rows_in_update_mode() -> None:
 
     assert rows == [{"sku": "A1", "inventory": "3"}]
     assert errors == []
+
+
+def test_build_export_rows_blocks_update_rows_with_safety_errors() -> None:
+    update_batch = InventoryUpdateBatch(
+        header=["sku", "inventory"],
+        rows=[{"sku": "A1", "inventory": "3"}],
+        results=[],
+        issue_rows=[
+            InventoryUpdateIssueRow(
+                source_row=0,
+                source={"Datei": "Wix-Export", "Marke": "Missing"},
+                kind="safety",
+                issues=[
+                    ValidationIssue(
+                        source_row=0,
+                        field="brand",
+                        severity=Severity.ERROR,
+                        message="Wix-Export enthält keine Produktzeile für Marke 'Missing'.",
+                    )
+                ],
+            )
+        ],
+    )
+    fake_app = SimpleNamespace(
+        mode_var=DummyVar("update"),
+        update_batch=update_batch,
+    )
+
+    rows, errors = gui_app.ConverterApp._build_export_rows(fake_app)
+
+    assert rows == []
+    assert len(errors) == 1
+    assert errors[0].field == "brand"
+
+
+def test_update_preview_values_include_brand_and_zero_status() -> None:
+    result = InventoryUpdateResult(
+        source_row=2,
+        wix_row={"sku": "A1", "name": "Alpha", "brand": "Brand", "inventory": "0"},
+        original_inventory="4",
+        updated_inventory="0",
+        matched=False,
+        changed=True,
+        set_to_zero=True,
+    )
+    fake_app = SimpleNamespace(mode_var=DummyVar("update"))
+
+    assert gui_app.ConverterApp._base_value_for_column(fake_app, result, "brand") == "Brand"
+    assert (
+        gui_app.ConverterApp._base_value_for_column(fake_app, result, "status")
+        == "Auf 0 gesetzt"
+    )
+
+
+def test_update_preview_values_label_unmanaged_wix_rows() -> None:
+    result = InventoryUpdateResult(
+        source_row=3,
+        wix_row={
+            "sku": "X1",
+            "name": "External",
+            "brand": "Additional Import",
+            "inventory": "5",
+        },
+        original_inventory="5",
+        updated_inventory="5",
+        matched=False,
+        changed=False,
+        source_kind="wix_unmanaged",
+    )
+    fake_app = SimpleNamespace(mode_var=DummyVar("update"))
+
+    assert (
+        gui_app.ConverterApp._base_value_for_column(fake_app, result, "status")
+        == "Nicht verwaltet"
+    )
+
+
+def test_update_report_descriptions_apply_only_to_new_rows() -> None:
+    new_result = InventoryUpdateResult(
+        source_row=8,
+        wix_row={
+            "sku": "A2",
+            "barcode": "R2",
+            "plainDescription": "Referenz: R2",
+        },
+        original_inventory="",
+        updated_inventory="2",
+        matched=False,
+        changed=True,
+        is_new_product=True,
+        source_kind="diamond",
+    )
+    existing_result = InventoryUpdateResult(
+        source_row=2,
+        wix_row={
+            "sku": "A1",
+            "barcode": "R1",
+            "plainDescription": "Existing",
+        },
+        original_inventory="1",
+        updated_inventory="1",
+        matched=True,
+        changed=False,
+    )
+    fake_app = SimpleNamespace(
+        mode_var=DummyVar("update"),
+        update_batch=InventoryUpdateBatch(
+            header=[],
+            rows=[existing_result.wix_row, new_result.wix_row],
+            results=[new_result, existing_result],
+        ),
+    )
+
+    matched = gui_app.ConverterApp._apply_report_descriptions_to_new_update_rows(
+        fake_app,
+        [
+            ReportDescriptionRecord(
+                source_row=10,
+                artikel_nr="A1",
+                referenz="R1",
+                beschreibung="Should not apply",
+            ),
+            ReportDescriptionRecord(
+                source_row=11,
+                artikel_nr="A2",
+                referenz="R2",
+                beschreibung="New long description",
+            ),
+        ],
+    )
+
+    assert matched == 1
+    assert existing_result.wix_row["plainDescription"] == "Existing"
+    assert new_result.wix_row["plainDescription"] == (
+        "New long description\nReferenz: R2"
+    )
+
+
+def test_finish_inventory_update_success_blocks_download_when_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shown: list[tuple[str, str]] = []
+    monkeypatch.setattr(gui_app.messagebox, "showerror", lambda title, message: shown.append((title, message)))
+
+    update_batch = InventoryUpdateBatch(
+        header=["sku", "inventory"],
+        rows=[{"sku": "A1", "inventory": "3"}],
+        results=[],
+        issue_rows=[
+            InventoryUpdateIssueRow(
+                source_row=0,
+                source={"Datei": "Wix-Export", "Marke": "Missing"},
+                kind="safety",
+                issues=[
+                    ValidationIssue(
+                        source_row=0,
+                        field="brand",
+                        severity=Severity.ERROR,
+                        message="missing",
+                    )
+                ],
+            )
+        ],
+    )
+    fake_app = SimpleNamespace(
+        _conversion_running=True,
+        configure=lambda **kwargs: None,
+        _close_cell_editor=lambda save: None,
+        _preview_overrides={},
+        batch=object(),
+        update_batch=None,
+        progressbar=DummyWidget(),
+        progress_text_var=DummyVar(),
+        _render_preview=lambda: None,
+        download_wix_button=DummyWidget(),
+        download_issue_button=DummyWidget(),
+        add_description_button=DummyWidget(),
+        status_var=DummyVar(),
+    )
+    fake_app.progressbar.config["maximum"] = "1"
+
+    gui_app.ConverterApp._finish_inventory_update_success(fake_app, update_batch)
+
+    assert fake_app.download_wix_button.config["state"] == "disabled"
+    assert fake_app.download_issue_button.config["state"] == "normal"
+    assert fake_app.status_var.get() == "Bestandsupdate blockiert: Markenprüfung fehlgeschlagen."
+    assert shown and shown[0][0] == "Sicherheitsprüfung fehlgeschlagen"
+
+
+def test_download_issue_csv_uses_update_issue_rows(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "issues.csv"
+    written: dict[str, object] = {}
+    messages: list[tuple[str, str]] = []
+    issue_row = InventoryUpdateIssueRow(
+        source_row=3,
+        source={"Artikel Nr": "A2"},
+        kind="unmatched_diamond",
+        issues=[
+            ValidationIssue(
+                source_row=3,
+                field="Artikel Nr",
+                severity=Severity.WARNING,
+                message="not matched",
+            )
+        ],
+    )
+    update_batch = InventoryUpdateBatch(
+        header=["sku", "inventory"],
+        rows=[],
+        results=[],
+        issue_rows=[issue_row],
+    )
+    fake_app = SimpleNamespace(
+        mode_var=DummyVar("update"),
+        update_batch=update_batch,
+        _close_cell_editor=lambda save: None,
+        _default_download_directory=lambda: tmp_path,
+        _default_issue_filename=lambda severity=None: "issues.csv",
+    )
+
+    monkeypatch.setattr(gui_app.filedialog, "asksaveasfilename", lambda **kwargs: str(target))
+    monkeypatch.setattr(gui_app.messagebox, "showinfo", lambda title, message: messages.append((title, message)))
+
+    def fake_write_issue_csv(path, issue_rows):
+        written["path"] = path
+        written["rows"] = list(issue_rows)
+        return len(written["rows"])
+
+    monkeypatch.setattr(gui_app, "write_issue_csv", fake_write_issue_csv)
+
+    gui_app.ConverterApp._download_issue_csv(fake_app, severity=Severity.WARNING)
+
+    assert written == {"path": str(target), "rows": [issue_row]}
+    assert messages == [("Export", "Bericht gespeichert: issues.csv")]
 
 
 def test_finish_conversion_error_shows_exception_message(monkeypatch: pytest.MonkeyPatch) -> None:

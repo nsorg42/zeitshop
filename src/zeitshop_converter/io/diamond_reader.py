@@ -85,6 +85,10 @@ def _cell_to_text(value: object) -> str:
 
 def _header_indexes(raw_header: Sequence[object]) -> tuple[list[int], list[str]]:
     cleaned_header = [_canonical_header(_cell_to_text(value)) for value in raw_header]
+    if _is_column_textbox_export_header(cleaned_header):
+        keep_indexes = list(range(len(CANONICAL_COLUMNS)))
+        return keep_indexes, list(CANONICAL_COLUMNS)
+
     keep_indexes = [index for index, header in enumerate(cleaned_header) if header]
     final_header = [cleaned_header[index] for index in keep_indexes]
     return keep_indexes, final_header
@@ -117,6 +121,19 @@ _HEADER_TOKENS = {
     column: _tokenize_header_candidate(column) for column in CANONICAL_COLUMNS
 }
 _IDENTITY_COLUMNS = ("Artikel Nr", "Referenz", "Kurzbeschreibung")
+
+
+def _is_column_textbox_export_header(cleaned_header: Sequence[str]) -> bool:
+    """Detect DIAMOND exports whose real headers were replaced by ColumnTextBoxN."""
+    if len(cleaned_header) < len(CANONICAL_COLUMNS):
+        return False
+
+    expected = [f"columntextbox{index}" for index in range(1, len(CANONICAL_COLUMNS) + 1)]
+    actual = [
+        _tokenize_header_candidate(header)
+        for header in cleaned_header[: len(CANONICAL_COLUMNS)]
+    ]
+    return actual == expected
 
 
 def _is_header_like_row(canonical_row: Mapping[str, str]) -> bool:

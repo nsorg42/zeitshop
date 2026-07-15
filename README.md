@@ -14,7 +14,8 @@ The converter is intentionally small: it reads DIAMOND-style `.csv` files, maps 
 - Maps source data into Wix `PRODUCT` rows
 - Validates required Wix fields
 - Writes a German issue report for errors and warnings
-- Updates inventory in an existing Wix product export from a newer DIAMOND inventory export
+- Updates inventory and availability text in an existing Wix product export from a newer DIAMOND inventory export
+- Checks update exports against a configurable fixed brand list
 - Supports both a Tkinter GUI and a CLI
 
 ## Scope
@@ -70,7 +71,8 @@ The GUI lets you:
 - edit selected product fields before export
 - download the Wix CSV
 - download a German issue report
-- switch to update mode, choose a Wix product export plus a newer DIAMOND inventory CSV, and save the updated Wix CSV
+- switch to update mode, choose a Wix product export plus a newer DIAMOND inventory CSV, review changes, and save the updated Wix CSV
+- edit the fixed brand list used by update-mode safety checks in the settings window
 
 ### CLI
 
@@ -99,7 +101,19 @@ python -m zeitshop_converter.main update \
   --output out/catalog_products_inventory_update.csv
 ```
 
-The command also updates the store availability sentence in `plainDescription` when the Wix export contains that column.
+Update mode changes the Wix `inventory` column and the availability sentence in `plainDescription` for configured brands. Matched products get the summed DIAMOND quantity and the current Am Bogen/Droz availability text from positive-stock DIAMOND rows. Wix products from configured brands that are missing from the DIAMOND export are set to `0` and their known availability sentence is removed. Wix product rows whose brand is not in the configured list are treated as unmanaged additional-import products and are preserved unchanged.
+
+DIAMOND products missing from the Wix export are converted into new Wix product rows and shown at the top of the update preview as `Neu`. These new products should be checked manually in Wix after import. In update mode, the `Beschreibung hinzufügen` button can load a DIAMOND report CSV and adds report descriptions only to those new rows.
+
+Both files must contain at least one product for every configured brand. Brands outside the configured list in the DIAMOND update file are blocking safety errors.
+
+The default brand list is stored in the package and copied on first use to:
+
+```text
+~/.zeitshop_converter/brands.txt
+```
+
+The GUI settings window can edit this runtime brand list.
 
 ## Output Files
 
@@ -127,6 +141,12 @@ To remove the installed app:
 
 ```bat
 scripts\uninstall_windows.cmd
+```
+
+To remove an old installation and install the current checkout again:
+
+```bat
+scripts\reinstall_windows.cmd
 ```
 
 ## Portable Windows Build

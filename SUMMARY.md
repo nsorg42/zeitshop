@@ -25,6 +25,8 @@ The application is intentionally focused on the shop workflow:
 │   ├── install_windows.cmd
 │   ├── install_windows.ps1
 │   ├── launch_gui.py
+│   ├── reinstall_windows.cmd
+│   ├── reinstall_windows.ps1
 │   ├── uninstall_windows.cmd
 │   └── uninstall_windows.ps1
 ├── src/zeitshop_converter/
@@ -70,7 +72,8 @@ zeitshop-converter gui
 It has two modes:
 
 - `Import`: choose a DIAMOND CSV, convert it, optionally edit selected fields, save the Wix import CSV, and save issue reports.
-- `Update`: choose a Wix product export plus a newer DIAMOND inventory CSV, update inventory, and save the updated Wix CSV.
+- `Update`: choose a Wix product export plus a newer DIAMOND inventory CSV, update inventory and availability text, and save the updated Wix CSV after fixed-brand safety checks pass.
+- `Einstellungen`: configure import defaults and edit the fixed update-mode brand list.
 
 ### CLI Conversion
 
@@ -99,7 +102,7 @@ zeitshop-converter update \
 
 `update-inventory` is accepted as an alias for `update`.
 
-The update mode matches Wix product rows by `sku` against DIAMOND `Artikel Nr`, updates the Wix `inventory` column, and updates the store availability sentence in `plainDescription` when that column is present.
+The update mode matches configured-brand Wix product rows by `sku` against DIAMOND `Artikel Nr`, updates the Wix `inventory` column, and replaces known availability sentences in `plainDescription`. Matching rows get the summed DIAMOND quantity and current Am Bogen/Droz availability from positive-stock DIAMOND rows; configured-brand Wix products missing from the DIAMOND update are set to `0` and lose known availability text; unmanaged Wix rows whose brand is not configured are preserved unchanged; DIAMOND products missing from the Wix export are converted into new Wix product rows.
 
 ## Conversion Flow
 
@@ -128,7 +131,8 @@ The main data containers are:
 - `WixRowResult`: mapped Wix product row plus validation issues.
 - `ConversionBatch`: all conversion results and convenience counts.
 - `InventoryUpdateResult`: one Wix product row after inventory matching.
-- `InventoryUpdateBatch`: updated rows plus match/change counts.
+- `InventoryUpdateIssueRow`: one safety or unmatched-row issue for update reports.
+- `InventoryUpdateBatch`: updated rows, issue rows, blocking status, and match/change/set-to-zero/new-product counts.
 
 ## CSV Handling
 
@@ -169,17 +173,23 @@ Validation distinguishes blocking errors from warnings so usable rows can still 
 
 ## Inventory Update
 
-`inventory_update.py` powers both GUI update mode and CLI update mode.
+`inventory_update.py` powers both GUI update mode and CLI update mode. The fixed brand list is loaded from `~/.zeitshop_converter/brands.txt`, which is created from packaged defaults on first use and can be edited in GUI settings.
 
 The updater:
 
 - reads a Wix product export CSV;
 - reads a newer DIAMOND inventory CSV;
 - sums quantities by `Artikel Nr`;
-- tracks branches with positive stock;
+- merges positive-stock branches by `Artikel Nr`;
 - updates matching Wix product rows by `sku`;
-- leaves unmatched products and non-product rows unchanged;
-- replaces old known availability sentences in `plainDescription`.
+- sets unmatched Wix product rows to `0`;
+- converts DIAMOND products missing from Wix into new product rows;
+- pins new product rows to the top of the GUI update preview;
+- can enrich only those new rows from a DIAMOND report CSV through `Beschreibung hinzufügen`;
+- replaces old or new known availability sentences in `plainDescription` with the current canonical wording;
+- blocks export when either file is missing a configured brand or the DIAMOND update contains a brand outside the configured list;
+- preserves unmanaged Wix rows whose brand is outside the configured list;
+- preserves non-product rows and every Wix field except `inventory` and `plainDescription` unchanged.
 
 ## Windows Installation
 
@@ -205,6 +215,12 @@ Uninstall with:
 
 ```bat
 scripts\uninstall_windows.cmd
+```
+
+Replace an old installation with the current checkout by running:
+
+```bat
+scripts\reinstall_windows.cmd
 ```
 
 For a portable PyInstaller bundle, build on Windows with:

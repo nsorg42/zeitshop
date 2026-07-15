@@ -91,7 +91,7 @@ def test_pipeline_builds_lager_plain_description_with_reference_and_availability
 
     assert (
         batch.valid_rows[0]["plainDescription"]
-        == "Referenz: R-1\nVerfügbar in dem Ladengeschäft Bijouterie Am Bogen in Bremgarten AG"
+        == "Referenz: R-1\nVerfügbar in der Bijouterie am Bogen in Bremgarten AG"
     )
 
 
@@ -324,7 +324,7 @@ def test_pipeline_merges_lager_branches_into_combined_availability_text() -> Non
     assert len(batch.results) == 1
     assert (
         batch.results[0].wix_row["plainDescription"]
-        == "Referenz: REF-1\nVerfügbar in den Ladengeschäften Bijouterie Am Bogen in Bremgarten AG "
+        == "Referenz: REF-1\nVerfügbar in der Bijouterie am Bogen in Bremgarten AG "
         "und in der Bijouterie Droz in Zofingen AG"
     )
 

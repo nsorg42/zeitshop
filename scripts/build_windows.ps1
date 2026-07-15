@@ -55,7 +55,7 @@ if ($createVenv) {
 
 Push-Location $repoRoot
 try {
-    & $pythonExe -m pip install --upgrade pip
+    & $pythonExe -m pip install --upgrade pip setuptools wheel
     & $pythonExe -m pip install -e ".[gui,windows-build]"
 
     if (Test-Path $appDir) {
@@ -73,6 +73,7 @@ try {
         --onedir `
         --name ZeitshopConverter `
         --paths src `
+        --collect-data zeitshop_converter `
         --collect-all sv_ttk `
         scripts\launch_gui.py
 

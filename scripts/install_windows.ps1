@@ -85,7 +85,7 @@ if ($createVenv) {
 
 Push-Location $repoRoot
 try {
-    & $pythonExe -m pip install --upgrade pip
+    & $pythonExe -m pip install --upgrade pip setuptools wheel
     & $pythonExe -m pip install --upgrade "$repoRoot[gui]"
 }
 finally {

@@ -11,6 +11,8 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from types import ModuleType
 
+from ..brand_storage import default_brands, load_brands, save_brands
+
 
 def _load_sv_ttk() -> ModuleType | None:
     """Load the optional sv_ttk theme module lazily."""
@@ -143,6 +145,8 @@ class ConverterApp(tk.Tk):
         self._update_preview_columns = (
             "artikel_nr",
             "name",
+            "brand",
+            "plain_description",
             "inventory_old",
             "inventory_new",
             "status",
@@ -340,18 +344,31 @@ class ConverterApp(tk.Tk):
             row=2, column=0, columnspan=2, sticky="w", pady=(2, 0)
         )
 
-        ttk.Label(upload_card, text="Ausgewählte Datei:", style="Muted.TLabel").grid(
+        self.diamond_file_label = ttk.Label(
+            upload_card, text="Ausgewählte Datei:", style="Muted.TLabel"
+        )
+        self.diamond_file_label.grid(
             row=3,
             column=0,
             sticky="w",
             pady=(12, 0),
         )
-        ttk.Label(
+        self.diamond_update_button = ttk.Button(
+            upload_card,
+            text="Diamond-Export auswählen",
+            style="Secondary.TButton",
+            command=self._select_diamond_update,
+        )
+        self.diamond_update_button.grid(row=3, column=1, sticky="e", pady=(12, 0))
+        self.diamond_path_label = ttk.Label(
             upload_card,
             textvariable=self.selected_path_var,
             style="PathValue.TLabel",
             wraplength=820,
-        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        )
+        self.diamond_path_label.grid(
+            row=4, column=0, columnspan=2, sticky="w", pady=(2, 0)
+        )
 
         upload_card.columnconfigure(0, weight=1)
 
@@ -488,6 +505,7 @@ class ConverterApp(tk.Tk):
         self.preview.tag_configure("odd", background="#f8fafc")
         self.preview.tag_configure("error", background="#ffe4e6")
         self.preview.tag_configure("warning", background="#fff7db")
+        self.preview.tag_configure("new", background="#dcfce7")
         self.preview.bind("<Double-1>", self._begin_cell_edit)
 
     def _is_import_mode(self) -> bool:
@@ -553,18 +571,22 @@ class ConverterApp(tk.Tk):
             self.wix_export_label.grid_remove()
             self.wix_export_button.grid_remove()
             self.wix_export_path_label.grid_remove()
+            self.diamond_file_label.configure(text="Ausgewählte Datei:")
+            self.diamond_update_button.grid_remove()
             self.add_description_button.configure(state="disabled")
         else:
             self.intro_var.set(
                 "Wix-Export und Lager-CSV auswählen, Bestand aktualisieren, und aktualisierte Wix-CSV speichern."
             )
             self.card_title_var.set("Bestandsupdate")
-            self.primary_action_var.set("Lagerdatei auswählen und aktualisieren")
-            self.summary_valid_label_var.set("Aktualisiert:")
+            self.primary_action_var.set("Bestand aktualisieren")
+            self.summary_valid_label_var.set("Geändert:")
             self._preview_columns = self._update_preview_columns
             self.wix_export_label.grid()
             self.wix_export_button.grid()
             self.wix_export_path_label.grid()
+            self.diamond_file_label.configure(text="DIAMOND Update-Export:")
+            self.diamond_update_button.grid()
             self.add_description_button.configure(state="disabled")
 
         self.status_var.set("Bereit.")
@@ -642,6 +664,14 @@ class ConverterApp(tk.Tk):
         ).pack(anchor="w", pady=(4, 12))
 
         visible_var = tk.BooleanVar(value=self.settings.default_visible)
+        try:
+            brand_values = load_brands()
+        except (OSError, ValueError) as exc:
+            messagebox.showerror(
+                "Markenliste",
+                f"Markenliste konnte nicht geladen werden:\n{exc}",
+            )
+            brand_values = []
 
         form = ttk.Frame(container)
         form.pack(fill="x")
@@ -652,18 +682,70 @@ class ConverterApp(tk.Tk):
             variable=visible_var,
         ).grid(row=0, column=0, columnspan=2, sticky="w")
 
+        ttk.Label(
+            form,
+            text="Marken für Bestandsupdate",
+            font=("Segoe UI", 10, "bold"),
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(18, 4))
+        ttk.Label(
+            form,
+            text="Eine Marke pro Zeile.",
+        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(0, 6))
+
+        brand_text_frame = ttk.Frame(form)
+        brand_text_frame.grid(row=3, column=0, columnspan=2, sticky="nsew")
+        brand_text_frame.columnconfigure(0, weight=1)
+        brand_text_frame.rowconfigure(0, weight=1)
+
+        brand_text = tk.Text(
+            brand_text_frame,
+            height=12,
+            wrap="none",
+            font=("Segoe UI", 10),
+            relief="solid",
+            borderwidth=1,
+            undo=True,
+        )
+        brand_scrollbar = ttk.Scrollbar(
+            brand_text_frame, orient="vertical", command=brand_text.yview
+        )
+        brand_text.configure(yscrollcommand=brand_scrollbar.set)
+        brand_text.grid(row=0, column=0, sticky="nsew")
+        brand_scrollbar.grid(row=0, column=1, sticky="ns", padx=(8, 0))
+        brand_text.insert("1.0", "\n".join(brand_values))
+
+        def reset_brand_text() -> None:
+            defaults = default_brands()
+            brand_text.delete("1.0", "end")
+            brand_text.insert("1.0", "\n".join(defaults))
+            self.status_var.set("Standard-Marken in Einstellungen geladen.")
+
+        ttk.Button(
+            form,
+            text="Standard-Marken wiederherstellen",
+            command=reset_brand_text,
+        ).grid(row=4, column=0, sticky="w", pady=(8, 0))
+
         form.columnconfigure(0, weight=1)
 
         def on_save() -> None:
             self.settings.default_visible = visible_var.get()
+            raw_brands = brand_text.get("1.0", "end").splitlines()
 
             try:
                 _save_settings(self.settings)
+                saved_brands = save_brands(raw_brands)
             except OSError as exc:
                 messagebox.showerror(
                     "Fehler", f"Einstellungen konnten nicht gespeichert werden:\n{exc}"
                 )
                 return
+            except ValueError as exc:
+                messagebox.showerror("Markenliste", str(exc))
+                return
+
+            brand_text.delete("1.0", "end")
+            brand_text.insert("1.0", "\n".join(saved_brands))
 
             self.status_var.set("Einstellungen gespeichert.")
             close_settings_window()
@@ -683,7 +765,7 @@ class ConverterApp(tk.Tk):
         if ConverterApp._is_import_mode(self):
             self._select_and_convert()
             return
-        self._select_and_update()
+        self._run_inventory_update()
 
     def _select_wix_export(self) -> None:
         """Pick a Wix export CSV used as the base for inventory updates."""
@@ -723,19 +805,14 @@ class ConverterApp(tk.Tk):
         self.selected_path_var.set(str(self.diamond_path))
         self._run_conversion()
 
-    def _select_and_update(self) -> None:
-        """Pick lager.csv input and update inventory inside an existing Wix export."""
+    def _select_diamond_update(self) -> bool:
+        """Pick the DIAMOND inventory export used for update mode."""
         if self._conversion_running:
             messagebox.showinfo("Hinweis", "Eine Konvertierung läuft bereits.")
-            return
-        if self.wix_export_path is None:
-            messagebox.showerror(
-                "Fehlende Datei", "Bitte zuerst den Wix Produkt-Export auswählen."
-            )
-            return
+            return False
 
         selected = filedialog.askopenfilename(
-            title="lager csv datei auswählen",
+            title="DIAMOND Update-Export auswählen",
             filetypes=(
                 ("DIAMOND CSV Dateien", "*.csv *.CSV"),
                 ("CSV Dateien", "*.csv *.CSV"),
@@ -743,11 +820,17 @@ class ConverterApp(tk.Tk):
             ),
         )
         if not selected:
-            return
+            return False
 
         self.diamond_path = Path(selected)
         self.selected_path_var.set(str(self.diamond_path))
-        self._run_inventory_update()
+        self.status_var.set("DIAMOND Update-Export ausgewählt.")
+        return True
+
+    def _select_and_update(self) -> None:
+        """Backwards-compatible helper: pick DIAMOND input and run update."""
+        if self._select_diamond_update():
+            self._run_inventory_update()
 
     def _build_options(self) -> ConversionOptions:
         """Create converter options from persisted settings."""
@@ -833,12 +916,47 @@ class ConverterApp(tk.Tk):
             self.progress_text_var.set(f"{self.progress_text_var.get()} abgeschlossen")
 
         self._render_preview()
-        self.download_wix_button.configure(state="normal")
-        self.download_issue_button.configure(state="disabled")
-        self.add_description_button.configure(state="disabled")
-        self.status_var.set(
-            f"Bestandsupdate abgeschlossen. Aktualisiert: {batch.changed_count}, gefunden: {batch.matched_count}."
+        self.download_wix_button.configure(
+            state="disabled" if batch.has_blocking_errors else "normal"
         )
+        self.download_issue_button.configure(
+            state="normal" if batch.issue_rows else "disabled"
+        )
+        self.add_description_button.configure(state="disabled")
+        if batch.has_blocking_errors:
+            messagebox.showerror(
+                "Sicherheitsprüfung fehlgeschlagen",
+                (
+                    "Das Bestandsupdate wurde berechnet, aber der Wix-Export ist "
+                    "gesperrt, weil die Markenprüfung Fehler gefunden hat.\n\n"
+                    f"Fehler: {batch.error_count}\n"
+                    f"Warnungen: {batch.warning_count}\n"
+                    "Bitte lade den Bericht herunter und prüfe die Exportdateien."
+                ),
+            )
+            self.status_var.set(
+                "Bestandsupdate blockiert: Markenprüfung fehlgeschlagen."
+            )
+            return
+
+        self.status_var.set(
+            (
+                "Bestandsupdate abgeschlossen. "
+                f"Geändert: {batch.changed_count}, gefunden: {batch.matched_count}, "
+                f"auf 0 gesetzt: {batch.set_to_zero_count}, "
+                f"neu: {batch.new_product_count}."
+            )
+        )
+        if batch.new_product_count > 0:
+            self.add_description_button.configure(state="normal")
+            messagebox.showinfo(
+                "Neue Produkte",
+                (
+                    f"{batch.new_product_count} neue Produkte wurden aus dem "
+                    "DIAMOND-Export erstellt und oben in der Tabelle markiert.\n\n"
+                    "Diese Produkte müssen nach dem Import in Wix manuell geprüft werden."
+                ),
+            )
 
     def _poll_conversion_events(self) -> None:
         """Process background conversion events on the Tk main loop."""
@@ -906,7 +1024,7 @@ class ConverterApp(tk.Tk):
         """Update inventory inside a Wix export using the selected lager.csv file."""
         if self.diamond_path is None:
             messagebox.showerror(
-                "Fehlende Datei", "Bitte zuerst eine Lager-Datei auswählen."
+                "Fehlende Datei", "Bitte zuerst einen DIAMOND Update-Export auswählen."
             )
             return
         if self.wix_export_path is None:
@@ -923,12 +1041,14 @@ class ConverterApp(tk.Tk):
         self.progress_text_var.set("")
         self.configure(cursor="watch")
         self.update_idletasks()
+        options = self._build_options()
 
         def worker() -> None:
             try:
                 batch = build_inventory_update_batch(
                     wix_export_csv=self.wix_export_path,
                     diamond_csv=self.diamond_path,
+                    options=options,
                 )
             except Exception as exc:  # pragma: no cover - GUI runtime path
                 self._conversion_events.put(("error", exc, None))
@@ -959,7 +1079,14 @@ class ConverterApp(tk.Tk):
 
     def _default_issue_filename(self, severity: Severity | None = None) -> str:
         """Build default issue filename for full or severity-specific reports."""
-        stem = self.diamond_path.stem if self.diamond_path is not None else "conversion"
+        if not ConverterApp._is_import_mode(self) and self.wix_export_path is not None:
+            stem = f"{self.wix_export_path.stem}_inventory_update"
+        else:
+            stem = (
+                self.diamond_path.stem
+                if self.diamond_path is not None
+                else "conversion"
+            )
         if severity == Severity.ERROR:
             return f"{stem}_fehler.csv"
         if severity == Severity.WARNING:
@@ -977,6 +1104,33 @@ class ConverterApp(tk.Tk):
             )
             return
         self._close_cell_editor(save=True)
+
+        if (
+            not ConverterApp._is_import_mode(self)
+            and self.update_batch is not None
+            and self.update_batch.has_blocking_errors
+        ):
+            blocking_issues = [
+                issue
+                for row in self.update_batch.issue_rows
+                for issue in row.issues
+                if issue.severity == Severity.ERROR
+            ]
+            preview = "\n".join(
+                self._format_export_error(issue) for issue in blocking_issues[:5]
+            )
+            remaining = len(blocking_issues) - min(len(blocking_issues), 5)
+            if remaining > 0:
+                preview = f"{preview}\n... und {remaining} weitere."
+            messagebox.showerror(
+                "Sicherheitsprüfung fehlgeschlagen",
+                (
+                    "Die aktualisierte Wix-CSV kann erst gespeichert werden, wenn "
+                    "die Markenprüfung keine Fehler mehr findet.\n\n"
+                    f"{preview}"
+                ),
+            )
+            return
 
         export_rows, export_errors = self._build_export_rows()
         if export_errors:
@@ -1026,17 +1180,31 @@ class ConverterApp(tk.Tk):
 
     def _download_issue_csv(self, severity: Severity | None = None) -> None:
         """Save issue rows (all, only errors, or only warnings) to CSV."""
-        if self.batch is None:
-            messagebox.showerror("Keine Daten", "Bitte zuerst eine Datei konvertieren.")
-            return
+        if ConverterApp._is_import_mode(self):
+            if self.batch is None:
+                messagebox.showerror(
+                    "Keine Daten", "Bitte zuerst eine Datei konvertieren."
+                )
+                return
+            all_issue_rows = self.batch.issue_rows
+            all_results = self.batch.results
+        else:
+            if self.update_batch is None:
+                messagebox.showerror(
+                    "Keine Daten", "Bitte zuerst ein Bestandsupdate ausführen."
+                )
+                return
+            all_issue_rows = self.update_batch.issue_rows
+            all_results = self.update_batch.issue_rows
+
         self._close_cell_editor(save=True)
 
         if severity is None:
-            issue_rows = self.batch.issue_rows
+            issue_rows = all_issue_rows
         else:
             issue_rows = [
                 result
-                for result in self.batch.results
+                for result in all_results
                 if any(issue.severity == severity for issue in result.issues)
             ]
 
@@ -1069,11 +1237,18 @@ class ConverterApp(tk.Tk):
 
     def _add_description_from_report_csv(self) -> None:
         """Load a report.csv export and merge descriptions into the description column."""
-        if not ConverterApp._is_import_mode(self) or self.batch is None:
+        if ConverterApp._is_import_mode(self):
+            if self.batch is None:
+                messagebox.showerror(
+                    "Keine Daten", "Bitte zuerst eine Lager-Datei konvertieren."
+                )
+                return
+        elif self.update_batch is None:
             messagebox.showerror(
-                "Keine Daten", "Bitte zuerst eine Lager-Datei konvertieren."
+                "Keine Daten", "Bitte zuerst ein Bestandsupdate ausführen."
             )
             return
+
         self._close_cell_editor(save=True)
 
         selected = filedialog.askopenfilename(
@@ -1098,19 +1273,30 @@ class ConverterApp(tk.Tk):
         if matched_rows == 0:
             messagebox.showerror(
                 "Keine Zuordnung",
-                "Es konnten keine passenden Produkte aus der Report-Datei zugeordnet werden.",
+                (
+                    "Es konnten keine passenden Produkte aus der Report-Datei "
+                    "zugeordnet werden."
+                ),
             )
             return
 
         self._render_preview()
-        self.status_var.set(
-            f"Beschreibung ergänzt: {matched_rows} Produkte aktualisiert."
-        )
+        if ConverterApp._is_import_mode(self):
+            self.status_var.set(
+                f"Beschreibung ergänzt: {matched_rows} Produkte aktualisiert."
+            )
+        else:
+            self.status_var.set(
+                f"Beschreibung ergänzt: {matched_rows} neue Produkte aktualisiert."
+            )
 
     def _apply_report_descriptions(
         self, descriptions: list[ReportDescriptionRecord]
     ) -> int:
         """Match report descriptions against current rows and store them as preview overrides."""
+        if not ConverterApp._is_import_mode(self):
+            return self._apply_report_descriptions_to_new_update_rows(descriptions)
+
         if self.batch is None:
             return 0
 
@@ -1150,6 +1336,52 @@ class ConverterApp(tk.Tk):
 
         return matched_rows
 
+    def _apply_report_descriptions_to_new_update_rows(
+        self, descriptions: list[ReportDescriptionRecord]
+    ) -> int:
+        """Merge report descriptions only into newly created update rows."""
+        if self.update_batch is None:
+            return 0
+
+        by_artikel_nr = {
+            description.artikel_nr: description.beschreibung
+            for description in descriptions
+            if description.artikel_nr
+        }
+        by_referenz = {
+            description.referenz: description.beschreibung
+            for description in descriptions
+            if description.referenz
+        }
+
+        matched_rows = 0
+        for result in self.update_batch.results:
+            if not result.is_new_product:
+                continue
+
+            artikel_nr = result.wix_row.get("sku", "").strip()
+            referenz = result.wix_row.get("barcode", "").strip()
+
+            beschreibung = ""
+            if artikel_nr:
+                beschreibung = by_artikel_nr.get(artikel_nr, "")
+            if not beschreibung and referenz:
+                beschreibung = by_referenz.get(referenz, "")
+            if not beschreibung:
+                continue
+
+            existing = result.wix_row.get("plainDescription", "").strip()
+            merged_description = beschreibung
+            if existing and existing != beschreibung:
+                merged_description = f"{beschreibung}\n{existing}"
+
+            result.wix_row["plainDescription"] = merged_description
+            if "Beschreibung" in result.wix_row:
+                result.wix_row["Beschreibung"] = merged_description
+            matched_rows += 1
+
+        return matched_rows
+
     def _base_value_for_column(self, result, column: str) -> str:
         """Return the original value for one preview column."""
         if not ConverterApp._is_import_mode(self):
@@ -1157,15 +1389,25 @@ class ConverterApp(tk.Tk):
                 return result.wix_row.get("sku", "")
             if column == "name":
                 return result.wix_row.get("name", "")
+            if column == "brand":
+                return result.wix_row.get("brand", "")
+            if column == "plain_description":
+                return result.wix_row.get("plainDescription", "")
             if column == "inventory_old":
                 return result.original_inventory
             if column == "inventory_new":
                 return result.updated_inventory
             if column == "status":
+                if result.is_new_product:
+                    return "Neu"
+                if getattr(result, "source_kind", "") == "wix_unmanaged":
+                    return "Nicht verwaltet"
+                if result.set_to_zero:
+                    return "Auf 0 gesetzt"
                 if result.changed:
                     return "Aktualisiert"
                 if result.matched:
-                    return "Gefunden"
+                    return "Unverändert"
                 return "Nicht gefunden"
             return ""
         if column == "artikel_nr":
@@ -1195,6 +1437,9 @@ class ConverterApp(tk.Tk):
 
     def _preview_item_id(self, result) -> str:
         """Build a stable Treeview row id from the source row number."""
+        if not ConverterApp._is_import_mode(self):
+            source_kind = getattr(result, "source_kind", "wix")
+            return f"row-{source_kind}-{result.source_row}"
         return f"row-{result.source_row}"
 
     def _preview_column_from_tree_id(self, tree_column: str) -> str | None:
@@ -1214,6 +1459,22 @@ class ConverterApp(tk.Tk):
         results = self._active_results()
         if not results or not item_id.startswith("row-"):
             return None
+        if not ConverterApp._is_import_mode(self):
+            try:
+                _prefix, source_kind, source_row_text = item_id.split("-", 2)
+                source_row = int(source_row_text)
+            except ValueError:
+                return None
+            return next(
+                (
+                    result
+                    for result in results
+                    if result.source_row == source_row
+                    and getattr(result, "source_kind", "wix") == source_kind
+                ),
+                None,
+            )
+
         try:
             source_row = int(item_id.removeprefix("row-"))
         except ValueError:
@@ -1398,6 +1659,13 @@ class ConverterApp(tk.Tk):
         if not ConverterApp._is_import_mode(self):
             if self.update_batch is None:
                 return [], []
+            if self.update_batch.has_blocking_errors:
+                return [], [
+                    issue
+                    for row in self.update_batch.issue_rows
+                    for issue in row.issues
+                    if issue.severity == Severity.ERROR
+                ]
             return [dict(row) for row in self.update_batch.rows], []
         if self.batch is None:
             return [], []
@@ -1503,6 +1771,10 @@ class ConverterApp(tk.Tk):
                 key=lambda result: self._sort_key(result, self._sort_column or ""),
                 reverse=self._sort_desc,
             )
+        if not ConverterApp._is_import_mode(self):
+            visible_results.sort(
+                key=lambda result: 0 if getattr(result, "is_new_product", False) else 1
+            )
 
         for index, result in enumerate(visible_results):
             tags = ["even" if index % 2 == 0 else "odd"]
@@ -1510,6 +1782,8 @@ class ConverterApp(tk.Tk):
                 tags.append("error")
             elif result.has_warnings:
                 tags.append("warning")
+            if getattr(result, "is_new_product", False):
+                tags.append("new")
 
             self.preview.insert(
                 "",
@@ -1541,8 +1815,12 @@ class ConverterApp(tk.Tk):
         else:
             total = 0 if self.update_batch is None else len(self.update_batch.results)
             valid = 0 if self.update_batch is None else self.update_batch.changed_count
-            error_count = 0
-            warning_count = 0
+            error_count = (
+                0 if self.update_batch is None else self.update_batch.error_count
+            )
+            warning_count = (
+                0 if self.update_batch is None else self.update_batch.warning_count
+            )
 
         self.summary_total_var.set(str(total))
         self.summary_valid_var.set(str(valid))
@@ -1559,21 +1837,26 @@ class ConverterApp(tk.Tk):
 
     def _open_issue_report(self, severity: Severity) -> None:
         """Download issue report for selected severity."""
-        if not ConverterApp._is_import_mode(self):
-            messagebox.showinfo(
-                "Hinweis", "Im Update-Modus gibt es keinen Fehlerbericht."
+        if ConverterApp._is_import_mode(self):
+            if self.batch is None:
+                messagebox.showinfo("Hinweis", "Noch keine Konvertierung vorhanden.")
+                return
+            issue_count = (
+                self.batch.error_count
+                if severity == Severity.ERROR
+                else self.batch.warning_count
             )
-            return
-        if self.batch is None:
-            messagebox.showinfo("Hinweis", "Noch keine Konvertierung vorhanden.")
-            return
-
-        if severity == Severity.ERROR:
-            issue_count = self.batch.error_count
-            title_label = "Fehler"
         else:
-            issue_count = self.batch.warning_count
-            title_label = "Warnungen"
+            if self.update_batch is None:
+                messagebox.showinfo("Hinweis", "Noch kein Bestandsupdate vorhanden.")
+                return
+            issue_count = (
+                self.update_batch.error_count
+                if severity == Severity.ERROR
+                else self.update_batch.warning_count
+            )
+
+        title_label = "Fehler" if severity == Severity.ERROR else "Warnungen"
 
         if issue_count == 0:
             messagebox.showinfo("Hinweis", f"Keine {title_label.lower()} vorhanden.")
