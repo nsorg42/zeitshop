@@ -41,6 +41,24 @@ def _parse_identity(text: str) -> tuple[str, str] | None:
     return artikel_nr, referenz
 
 
+def _has_description_header(row: list[str]) -> bool:
+    return any(normalize_text(value).casefold() == "beschreibung" for value in row)
+
+
+def _is_supported_report_header(row: list[str]) -> bool:
+    return (
+        _cell(row, 1).casefold() == "beschreibung"
+        and _cell(row, 3).casefold() == "preis"
+    )
+
+
+def _invalid_report_format_message() -> str:
+    return (
+        "Ungültiges Report.csv-Format. Bitte den DIAMOND Report.csv Export "
+        "verwenden; erwartet wird die Kopfzeile ';Beschreibung;;Preis;'."
+    )
+
+
 def read_report_description_csv(path: str | Path) -> list[ReportDescriptionRecord]:
     """Read a report.csv-style export into product description records."""
 
@@ -53,6 +71,7 @@ def read_report_description_csv(path: str | Path) -> list[ReportDescriptionRecor
     records: list[ReportDescriptionRecord] = []
     current_identity: tuple[int, str, str] | None = None
     description_lines: list[str] = []
+    found_report_header = False
 
     def flush() -> None:
         nonlocal current_identity, description_lines
@@ -81,6 +100,16 @@ def read_report_description_csv(path: str | Path) -> list[ReportDescriptionRecor
         if not any(normalize_text(value) for value in raw_row):
             continue
 
+        if _has_description_header(raw_row):
+            if not _is_supported_report_header(raw_row):
+                raise ValueError(_invalid_report_format_message())
+            found_report_header = True
+            flush()
+            continue
+
+        if not found_report_header:
+            continue
+
         if description_cell and price:
             flush()
             continue
@@ -96,4 +125,6 @@ def read_report_description_csv(path: str | Path) -> list[ReportDescriptionRecor
             description_lines.append(description_cell)
 
     flush()
+    if not found_report_header:
+        raise ValueError(_invalid_report_format_message())
     return records

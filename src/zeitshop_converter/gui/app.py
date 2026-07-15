@@ -924,6 +924,7 @@ class ConverterApp(tk.Tk):
         )
         self.add_description_button.configure(state="disabled")
         if batch.has_blocking_errors:
+            details = ConverterApp._format_update_blocking_details(self, batch)
             messagebox.showerror(
                 "Sicherheitsprüfung fehlgeschlagen",
                 (
@@ -931,6 +932,7 @@ class ConverterApp(tk.Tk):
                     "gesperrt, weil die Markenprüfung Fehler gefunden hat.\n\n"
                     f"Fehler: {batch.error_count}\n"
                     f"Warnungen: {batch.warning_count}\n"
+                    f"{details}\n"
                     "Bitte lade den Bericht herunter und prüfe die Exportdateien."
                 ),
             )
@@ -957,6 +959,25 @@ class ConverterApp(tk.Tk):
                     "Diese Produkte müssen nach dem Import in Wix manuell geprüft werden."
                 ),
             )
+
+    def _format_update_blocking_details(self, batch: InventoryUpdateBatch) -> str:
+        """Return a short human-readable summary of blocking update issues."""
+        messages: list[str] = []
+        for issue_row in batch.issue_rows:
+            for issue in issue_row.issues:
+                if issue.severity != Severity.ERROR:
+                    continue
+                messages.append(issue.message)
+
+        if not messages:
+            return ""
+
+        shown_messages = messages[:3]
+        detail = "\n".join(f"- {message}" for message in shown_messages)
+        remaining = len(messages) - len(shown_messages)
+        if remaining > 0:
+            detail = f"{detail}\n- ... und {remaining} weitere Fehler"
+        return f"\nDetails:\n{detail}\n"
 
     def _poll_conversion_events(self) -> None:
         """Process background conversion events on the Tk main loop."""

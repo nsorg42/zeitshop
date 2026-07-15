@@ -348,6 +348,38 @@ def test_build_inventory_update_batch_creates_new_rows_for_unmatched_diamond_pro
     assert batch.results[1].is_new_product is False
 
 
+def test_build_inventory_update_batch_rewrites_new_barcodes_that_exist_in_wix(
+    tmp_path: Path,
+) -> None:
+    diamond_csv = tmp_path / "lager.csv"
+    diamond_csv.write_text(
+        "Filiale;Marke;Artikel Nr;Menge;Einstand;Verkauf;Produktlinie;Kurzbeschreibung;Referenz\n"
+        "Am Bogen;Brand;A1;1;5;10;Line;Existing;REF-1\n"
+        "Droz;Brand;A2;2;6;12;Line;New Product;REF-1\n",
+        encoding="utf-8",
+    )
+
+    wix_csv = tmp_path / "catalog_products.csv"
+    wix_csv.write_text(
+        "handle,fieldType,name,brand,plainDescription,price,cost,inventory,sku,barcode\n"
+        "one,PRODUCT,Alpha,Brand,Old,10,5,9,A1,REF-1\n",
+        encoding="utf-8",
+    )
+
+    batch = build_inventory_update_batch(
+        wix_export_csv=wix_csv,
+        diamond_csv=diamond_csv,
+        brands=["Brand"],
+    )
+
+    assert batch.has_blocking_errors is False
+    assert batch.new_product_count == 1
+    assert batch.rows[0]["barcode"] == "REF-1"
+    assert batch.rows[1]["sku"] == "A2"
+    assert batch.rows[1]["barcode"] == "A2"
+    assert len({row["barcode"] for row in batch.rows if row.get("barcode")}) == 2
+
+
 def test_build_inventory_update_batch_blocks_invalid_new_products(
     tmp_path: Path,
 ) -> None:

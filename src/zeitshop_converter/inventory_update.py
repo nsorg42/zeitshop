@@ -17,6 +17,7 @@ from .core import (
     ValidationIssue,
     convert_records,
 )
+from .core.barcodes import ensure_unique_product_barcodes
 from .core.mapping import merge_availability_into_description
 from .core.normalize import normalize_text, parse_quantity
 from .io import read_diamond_file
@@ -432,6 +433,11 @@ def build_inventory_update_batch(
                 )
             )
 
+    existing_barcodes = [
+        normalize_text(row.get("barcode"))
+        for row in updated_rows
+        if normalize_text(row.get("barcode"))
+    ]
     new_results: list[InventoryUpdateResult] = []
     for result in new_product_batch.results:
         if result.has_errors:
@@ -445,7 +451,6 @@ def build_inventory_update_batch(
                 row.get("plainDescription", ""),
                 snapshot.branches if snapshot is not None else (),
             )
-        updated_rows.append(row)
         inventory = normalize_text(row.get("inventory"))
         new_results.append(
             InventoryUpdateResult(
@@ -460,6 +465,12 @@ def build_inventory_update_batch(
                 source_kind="diamond",
             )
         )
+
+    ensure_unique_product_barcodes(
+        [(result.source_row, result.wix_row) for result in new_results],
+        reserved_barcodes=existing_barcodes,
+    )
+    updated_rows.extend(result.wix_row for result in new_results)
 
     return InventoryUpdateBatch(
         header=header,

@@ -626,6 +626,42 @@ def test_finish_inventory_update_success_blocks_download_when_errors(
     assert fake_app.download_issue_button.config["state"] == "normal"
     assert fake_app.status_var.get() == "Bestandsupdate blockiert: Markenprüfung fehlgeschlagen."
     assert shown and shown[0][0] == "Sicherheitsprüfung fehlgeschlagen"
+    assert "- missing" in shown[0][1]
+
+
+def test_format_update_blocking_details_limits_error_messages() -> None:
+    update_batch = InventoryUpdateBatch(
+        header=[],
+        rows=[],
+        results=[],
+        issue_rows=[
+            InventoryUpdateIssueRow(
+                source_row=index,
+                source={},
+                kind="safety",
+                issues=[
+                    ValidationIssue(
+                        source_row=index,
+                        field="brand",
+                        severity=Severity.ERROR,
+                        message=f"Fehler {index}",
+                    )
+                ],
+            )
+            for index in range(1, 5)
+        ],
+    )
+    fake_app = SimpleNamespace()
+
+    details = gui_app.ConverterApp._format_update_blocking_details(
+        fake_app,
+        update_batch,
+    )
+
+    assert "Fehler 1" in details
+    assert "Fehler 3" in details
+    assert "Fehler 4" not in details
+    assert "und 1 weitere Fehler" in details
 
 
 def test_download_issue_csv_uses_update_issue_rows(

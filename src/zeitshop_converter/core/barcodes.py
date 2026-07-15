@@ -51,12 +51,14 @@ def _candidate_barcodes(
 
 def ensure_unique_product_barcodes(
     products: Sequence[tuple[int, MutableMapping[str, str]]],
+    reserved_barcodes: Sequence[str] = (),
 ) -> None:
     """Mutate PRODUCT rows so every non-empty barcode is unique.
 
     Rows that already have a unique barcode keep it. Rows inside a duplicate
     barcode group receive a deterministic fallback derived from SKU, handle,
-    and source row.
+    and source row. Reserved barcodes are treated as already used but are not
+    mutated.
     """
 
     original_barcodes = [
@@ -64,14 +66,24 @@ def ensure_unique_product_barcodes(
         for _source_row, row in products
     ]
     counts = Counter(barcode for barcode in original_barcodes if barcode)
-    used = {
+    reserved_keys = {
+        normalize_text(barcode).casefold()
+        for barcode in reserved_barcodes
+        if normalize_text(barcode)
+    }
+    used = set(reserved_keys)
+    used.update(
         barcode.casefold()
         for barcode, count in counts.items()
         if count == 1
-    }
+        and barcode.casefold() not in reserved_keys
+    )
 
     for (source_row, row), original in zip(products, original_barcodes, strict=False):
-        if not original or counts[original] == 1:
+        original_key = original.casefold()
+        if not original:
+            continue
+        if counts[original] == 1 and original_key not in reserved_keys:
             continue
 
         sku = normalize_text(row.get("sku"))

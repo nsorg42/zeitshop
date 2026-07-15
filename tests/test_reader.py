@@ -133,3 +133,30 @@ def test_read_report_description_csv_extracts_identity_and_description(tmp_path:
             beschreibung="Edelstahlgehäuse und -band, blaues Zifferblatt",
         )
     ]
+
+
+def test_read_report_description_csv_rejects_shifted_description_layout(tmp_path: Path) -> None:
+    file_path = tmp_path / "update_description.csv"
+    file_path.write_text(
+        "Am Bogen | Laden;15.07.2026 | 16:53;;;;;;;\n"
+        ";;;;Beschreibung;;;Menge;Einstand\n"
+        ";;;;Ice Cartoon XS Dino;;;1;44.50\n"
+        ";;;;123368 | 018 931;;;;\n"
+        ";;;;Kunststoff: blau | Quarz: 250420230;;;;\n",
+        encoding="cp1252",
+    )
+
+    with pytest.raises(ValueError, match="Report.csv-Format"):
+        read_report_description_csv(file_path)
+
+
+def test_read_report_description_csv_rejects_files_without_report_header(tmp_path: Path) -> None:
+    file_path = tmp_path / "not_report.csv"
+    file_path.write_text(
+        "Artikel Nr;Beschreibung\n"
+        "117759;Edelstahlgehäuse\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="Report.csv-Format"):
+        read_report_description_csv(file_path)
