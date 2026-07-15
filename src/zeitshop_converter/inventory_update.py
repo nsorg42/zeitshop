@@ -19,7 +19,7 @@ from .core import (
 )
 from .core.barcodes import ensure_unique_product_barcodes
 from .core.mapping import merge_availability_into_description
-from .core.normalize import normalize_text, parse_quantity
+from .core.normalize import make_handle, normalize_text, parse_quantity
 from .io import read_diamond_file
 from .io.detect import detect_encoding, sniff_dialect
 
@@ -332,6 +332,61 @@ def _issue_rows_from_new_product_conversion(
     return issue_rows
 
 
+def _name_slug(value: str | None) -> str:
+    return make_handle(value, prefix="")
+
+
+def _unique_name_candidate(row: Mapping[str, str], source_row: int) -> str:
+    name = normalize_text(row.get("name"))
+    sku = normalize_text(row.get("sku"))
+    handle = normalize_text(row.get("handle"))
+
+    for suffix in (sku, handle, str(source_row)):
+        if not suffix:
+            continue
+        candidate = f"{name} {suffix}" if name else suffix
+        if candidate != name:
+            return candidate
+    return name
+
+
+def _ensure_new_product_names_have_unique_slugs(
+    new_results: Sequence[InventoryUpdateResult],
+    existing_rows: Sequence[Mapping[str, str]],
+) -> None:
+    """Avoid Wix duplicate slug errors for generated update products.
+
+    Wix derives product slugs during CSV import, but the product export does not
+    expose a slug column. For new products only, make colliding names unique by
+    appending the SKU so Wix can derive a unique slug.
+    """
+
+    used_slugs = {
+        slug
+        for row in existing_rows
+        for slug in [_name_slug(row.get("name"))]
+        if slug
+    }
+
+    for result in new_results:
+        row = result.wix_row
+        current_name = normalize_text(row.get("name"))
+        current_slug = _name_slug(current_name)
+        if not current_slug:
+            continue
+        if current_slug not in used_slugs:
+            used_slugs.add(current_slug)
+            continue
+
+        candidate = _unique_name_candidate(row, result.source_row)
+        candidate_slug = _name_slug(candidate)
+        if candidate_slug in used_slugs:
+            candidate = f"{candidate} {result.source_row}"
+            candidate_slug = _name_slug(candidate)
+        row["name"] = candidate
+        used_slugs.add(candidate_slug)
+
+
 def build_inventory_update_batch(
     *,
     wix_export_csv: str | Path,
@@ -469,6 +524,10 @@ def build_inventory_update_batch(
     ensure_unique_product_barcodes(
         [(result.source_row, result.wix_row) for result in new_results],
         reserved_barcodes=existing_barcodes,
+    )
+    _ensure_new_product_names_have_unique_slugs(
+        new_results,
+        updated_rows,
     )
     updated_rows.extend(result.wix_row for result in new_results)
 
