@@ -199,4 +199,6 @@ def test_windows_install_uninstall_and_reinstall_scripts_are_present() -> None:
     reinstall_script = (scripts / "reinstall_windows.ps1").read_text(encoding="utf-8")
     assert "uninstall_windows.ps1" in reinstall_script
     assert "install_windows.ps1" in reinstall_script
-    assert "-InstallDir" in reinstall_script
+    assert "InstallDir = $InstallDir" in reinstall_script
+    assert '@installParams' in reinstall_script
+    assert '$installArgs = @(' not in reinstall_script

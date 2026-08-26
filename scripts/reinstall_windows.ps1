@@ -10,9 +10,11 @@ $scriptDir = $PSScriptRoot
 
 & (Join-Path $scriptDir "uninstall_windows.ps1") -InstallDir $InstallDir
 
-$installArgs = @("-InstallDir", $InstallDir)
+$installParams = @{
+    InstallDir = $InstallDir
+}
 if ($NoShortcuts) {
-    $installArgs += "-NoShortcuts"
+    $installParams["NoShortcuts"] = $true
 }
 
-& (Join-Path $scriptDir "install_windows.ps1") @installArgs
+& (Join-Path $scriptDir "install_windows.ps1") @installParams
