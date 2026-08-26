@@ -21,6 +21,7 @@ from .core.barcodes import ensure_unique_product_barcodes
 from .core.mapping import (
     merge_availability_into_description,
     merge_location_category_slugs,
+    merge_scoped_brand_category_slug,
 )
 from .core.normalize import make_handle, normalize_text, parse_quantity
 from .io import read_diamond_file
@@ -44,6 +45,8 @@ _WIX_EXPORT_COLUMN_ALIASES = {
 class _DiamondInventorySnapshot:
     inventory: str
     branches: tuple[str, ...]
+    brand: str
+    category: str
 
 
 def _canonical_wix_export_header(value: str | None) -> str:
@@ -253,6 +256,8 @@ def _inventory_by_artikel_nr(
 ) -> dict[str, _DiamondInventorySnapshot]:
     inventory: dict[str, int] = {}
     branches_by_artikel_nr: dict[str, list[str]] = {}
+    brand_by_artikel_nr: dict[str, str] = {}
+    category_by_artikel_nr: dict[str, str] = {}
 
     for record in records:
         artikel_nr = _inventory_match_key(record.data.get("Artikel Nr"))
@@ -268,6 +273,12 @@ def _inventory_by_artikel_nr(
 
         quantity = qty or 0
         inventory[artikel_nr] = inventory.get(artikel_nr, 0) + quantity
+        brand = normalize_text(record.data.get("Marke"))
+        if brand and artikel_nr not in brand_by_artikel_nr:
+            brand_by_artikel_nr[artikel_nr] = brand
+        category = normalize_text(record.data.get("Kategorie"))
+        if category and artikel_nr not in category_by_artikel_nr:
+            category_by_artikel_nr[artikel_nr] = category
         if quantity > 0:
             branch = normalize_text(record.data.get("Filiale"))
             if branch:
@@ -279,6 +290,8 @@ def _inventory_by_artikel_nr(
         artikel_nr: _DiamondInventorySnapshot(
             inventory=str(max(quantity, 0)),
             branches=tuple(branches_by_artikel_nr.get(artikel_nr, [])),
+            brand=brand_by_artikel_nr.get(artikel_nr, ""),
+            category=category_by_artikel_nr.get(artikel_nr, ""),
         )
         for artikel_nr, quantity in inventory.items()
     }
@@ -475,9 +488,17 @@ def build_inventory_update_batch(
                 )
                 row["plainDescription"] = new_description
             if "categorySlugs" in row:
+                current_category_slugs = old_category_slugs
+                if matched and snapshot is not None:
+                    current_category_slugs = merge_scoped_brand_category_slug(
+                        current_category_slugs,
+                        snapshot.brand,
+                        snapshot.category,
+                    )
                 new_category_slugs = merge_location_category_slugs(
-                    old_category_slugs,
+                    current_category_slugs,
                     branches,
+                    snapshot.category if matched and snapshot is not None else "",
                 )
                 row["categorySlugs"] = new_category_slugs
 
@@ -522,9 +543,15 @@ def build_inventory_update_batch(
                 branches,
             )
         if "categorySlugs" in row:
-            row["categorySlugs"] = merge_location_category_slugs(
+            category_slugs = merge_scoped_brand_category_slug(
                 row.get("categorySlugs", ""),
+                snapshot.brand if snapshot is not None else "",
+                snapshot.category if snapshot is not None else "",
+            )
+            row["categorySlugs"] = merge_location_category_slugs(
+                category_slugs,
                 branches,
+                snapshot.category if snapshot is not None else "",
             )
         inventory = normalize_text(row.get("inventory"))
         new_results.append(

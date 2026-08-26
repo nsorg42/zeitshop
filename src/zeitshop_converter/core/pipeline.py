@@ -137,13 +137,14 @@ def _merge_compatible_rows(rows: list[DiamondRecord]) -> DiamondRecord:
     branches: list[str] = []
 
     for row in rows:
-        branch = normalize_text(row.data.get("Filiale"))
-        if branch and branch not in branches:
-            branches.append(branch)
         qty = parse_quantity(row.data.get("Menge"))
         if qty is not None:
             qty_total += qty
             qty_found = True
+        if (qty or 0) > 0:
+            branch = normalize_text(row.data.get("Filiale"))
+            if branch and branch not in branches:
+                branches.append(branch)
 
     if branches:
         merged_data["Filiale"] = " | ".join(branches)

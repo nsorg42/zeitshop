@@ -160,40 +160,62 @@ def test_build_inventory_update_batch_updates_html_availability_descriptions(
 
 
 @pytest.mark.parametrize(
-    ("diamond_rows", "expected_category_slugs"),
+    ("diamond_rows", "wix_category_slugs", "expected_category_slugs"),
     [
         pytest.param(
-            "Am Bogen;Brand;A1;1\n",
-            "uhren;brand;bremgarten",
-            id="bremgarten",
+            "Am Bogen;Uhr;Brand;A1;1\n",
+            "uhren;brand",
+            "uhren;brand;bremgarten;bremgarten-uhren",
+            id="bremgarten-watch",
         ),
         pytest.param(
-            "Droz;Brand;A1;1\n",
-            "uhren;brand;zofingen",
-            id="zofingen",
+            "Droz;Uhr;Brand;A1;1\n",
+            "uhren;brand",
+            "uhren;brand;zofingen;zofingen-uhren",
+            id="zofingen-watch",
         ),
         pytest.param(
-            "Droz;Brand;A1;1\nAm Bogen;Brand;A1;2\n",
-            "uhren;brand;bremgarten;zofingen",
-            id="both-stores",
+            "Am Bogen;Schmuck;Brand;A1;1\n",
+            "schmuck;brand",
+            "schmuck;brand;bremgarten;bremgarten-schmuck",
+            id="bremgarten-jewelry",
+        ),
+        pytest.param(
+            "Droz;Schmuck;Brand;A1;1\n",
+            "schmuck;brand",
+            "schmuck;brand;zofingen;zofingen-schmuck",
+            id="zofingen-jewelry",
+        ),
+        pytest.param(
+            "Droz;Uhr;Brand;A1;1\nAm Bogen;Uhr;Brand;A1;2\n",
+            "uhren;brand",
+            "uhren;brand;bremgarten;zofingen;bremgarten-uhren;zofingen-uhren",
+            id="both-stores-watch",
+        ),
+        pytest.param(
+            "Droz;;Brand;A1;1\n",
+            "uhren;brand",
+            "uhren;brand;zofingen;zofingen-uhren",
+            id="wix-category-fallback",
         ),
     ],
 )
 def test_build_inventory_update_batch_adds_current_location_categories(
     tmp_path: Path,
     diamond_rows: str,
+    wix_category_slugs: str,
     expected_category_slugs: str,
 ) -> None:
     diamond_csv = tmp_path / "lager.csv"
     diamond_csv.write_text(
-        "Filiale;Marke;Artikel Nr;Menge\n" + diamond_rows,
+        "Filiale;Kategorie;Marke;Artikel Nr;Menge\n" + diamond_rows,
         encoding="utf-8",
     )
 
     wix_csv = tmp_path / "catalog_products.csv"
     wix_csv.write_text(
         "handle,fieldType,name,brand,categorySlugs,primaryCategorySlug,inventory,sku\n"
-        "one,PRODUCT,Alpha,Brand,uhren;brand,uhren,9,A1\n",
+        f"one,PRODUCT,Alpha,Brand,{wix_category_slugs},legacy-primary,9,A1\n",
         encoding="utf-8",
     )
 
@@ -204,7 +226,7 @@ def test_build_inventory_update_batch_adds_current_location_categories(
     )
 
     assert batch.rows[0]["categorySlugs"] == expected_category_slugs
-    assert batch.rows[0]["primaryCategorySlug"] == "uhren"
+    assert batch.rows[0]["primaryCategorySlug"] == "legacy-primary"
 
 
 def test_build_inventory_update_batch_replaces_location_category_after_move(
@@ -212,16 +234,16 @@ def test_build_inventory_update_batch_replaces_location_category_after_move(
 ) -> None:
     diamond_csv = tmp_path / "lager.csv"
     diamond_csv.write_text(
-        "Filiale;Marke;Artikel Nr;Menge\n"
-        "Droz;Brand;A1;2\n",
+        "Filiale;Kategorie;Marke;Artikel Nr;Menge\n"
+        "Droz;Uhr;Brand;A1;2\n",
         encoding="utf-8",
     )
 
     wix_csv = tmp_path / "catalog_products.csv"
     wix_csv.write_text(
         "handle,fieldType,name,brand,plainDescription,categorySlugs,primaryCategorySlug,inventory,sku,ribbon\n"
-        'one,PRODUCT,Alpha,Brand,"Specs\nVerfügbar in der Bijouterie am Bogen in Bremgarten AG",uhren;bremgarten;aktionen,uhren,9,A1,Bestseller\n'
-        "one,MEDIA,Media,Brand,Media text,media;bremgarten,media-primary,media-stock,A1,Media ribbon\n",
+        'one,PRODUCT,Alpha,Brand,"Specs\nVerfügbar in der Bijouterie am Bogen in Bremgarten AG",uhren;bremgarten;bremgarten-uhren;zofingen-schmuck;aktionen,uhren,9,A1,Bestseller\n'
+        "one,MEDIA,Media,Brand,Media text,media;bremgarten;bremgarten-uhren,media-primary,media-stock,A1,Media ribbon\n",
         encoding="utf-8",
     )
 
@@ -231,7 +253,9 @@ def test_build_inventory_update_batch_replaces_location_category_after_move(
         brands=["Brand"],
     )
 
-    assert batch.rows[0]["categorySlugs"] == "uhren;aktionen;zofingen"
+    assert batch.rows[0]["categorySlugs"] == (
+        "uhren;aktionen;zofingen;zofingen-uhren"
+    )
     assert batch.rows[0]["primaryCategorySlug"] == "uhren"
     assert batch.rows[0]["ribbon"] == "Bestseller"
     assert batch.rows[0]["plainDescription"] == (
@@ -243,7 +267,7 @@ def test_build_inventory_update_batch_replaces_location_category_after_move(
         "name": "Media",
         "brand": "Brand",
         "plainDescription": "Media text",
-        "categorySlugs": "media;bremgarten",
+        "categorySlugs": "media;bremgarten;bremgarten-uhren",
         "primaryCategorySlug": "media-primary",
         "inventory": "media-stock",
         "sku": "A1",
@@ -251,21 +275,97 @@ def test_build_inventory_update_batch_replaces_location_category_after_move(
     }
 
 
-def test_build_inventory_update_batch_removes_locations_from_out_of_stock_products(
+def test_build_inventory_update_batch_reconciles_scoped_brand_categories(
     tmp_path: Path,
 ) -> None:
     diamond_csv = tmp_path / "lager.csv"
     diamond_csv.write_text(
-        "Filiale;Marke;Artikel Nr;Menge\n"
-        "Am Bogen;Brand;A1;0\n",
+        "Filiale;Kategorie;Warengruppe;Marke;Artikel Nr;Menge\n"
+        "Am Bogen;Uhr;Herrenuhr;Thomas Sabo;W1;1\n"
+        "Droz;Schmuck;Ring;Thomas Sabo;J1;1\n",
         encoding="utf-8",
     )
 
     wix_csv = tmp_path / "catalog_products.csv"
     wix_csv.write_text(
         "handle,fieldType,name,brand,categorySlugs,primaryCategorySlug,inventory,sku\n"
-        "one,PRODUCT,Alpha,Brand,uhren;bremgarten;zofingen;brand,uhren,3,A1\n"
-        "two,PRODUCT,Beta,Brand,schmuck;zofingen;brand,schmuck,1,A2\n",
+        "watch,PRODUCT,Watch,Thomas Sabo,uhren;herrenuhren;thomas-sabo;thomas-sabo-uhren;thomas-sabo-uhren;sale;bremgarten,watch-primary,1,W1\n"
+        "jewel,PRODUCT,Jewel,Thomas Sabo,schmuck;ringe;thomas-sabo-uhren;sale;zofingen,jewelry-primary,1,J1\n"
+        "watch,MEDIA,Media,Thomas Sabo,media;thomas-sabo,media-primary,,W1\n",
+        encoding="utf-8",
+    )
+
+    batch = build_inventory_update_batch(
+        wix_export_csv=wix_csv,
+        diamond_csv=diamond_csv,
+        brands=["Thomas Sabo"],
+    )
+
+    assert batch.changed_count == 2
+    assert batch.rows[0]["categorySlugs"] == (
+        "uhren;herrenuhren;thomas-sabo-uhren;sale;bremgarten;bremgarten-uhren"
+    )
+    assert batch.rows[1]["categorySlugs"] == (
+        "schmuck;ringe;sale;thomas-sabo;zofingen;zofingen-schmuck"
+    )
+    assert batch.rows[0]["primaryCategorySlug"] == "watch-primary"
+    assert batch.rows[1]["primaryCategorySlug"] == "jewelry-primary"
+    assert batch.rows[2]["categorySlugs"] == "media;thomas-sabo"
+    assert batch.rows[2]["primaryCategorySlug"] == "media-primary"
+
+
+def test_build_inventory_update_batch_scopes_new_thomas_sabo_products(
+    tmp_path: Path,
+) -> None:
+    diamond_csv = tmp_path / "lager.csv"
+    diamond_csv.write_text(
+        "Filiale;Kategorie;Warengruppe;Marke;Artikel Nr;Menge;Einstand;Verkauf;Produktlinie;Kurzbeschreibung;Referenz\n"
+        "Am Bogen;Schmuck;Ring;Thomas Sabo;J1;1;5;10;Jewellery;Existing;R1\n"
+        "Am Bogen;Uhr;Herrenuhr;Thomas Sabo;W2;1;6;12;Watch;New;R2\n"
+        "Droz;Schmuck;Ring;Thomas Sabo;J2;1;7;14;Jewellery;New;R3\n",
+        encoding="utf-8",
+    )
+
+    wix_csv = tmp_path / "catalog_products.csv"
+    wix_csv.write_text(
+        "handle,fieldType,name,brand,plainDescription,categorySlugs,primaryCategorySlug,price,cost,inventory,sku,barcode\n"
+        "jewel,PRODUCT,Existing,Thomas Sabo,Old,schmuck;ringe;thomas-sabo,schmuck,10,5,1,J1,R1\n",
+        encoding="utf-8",
+    )
+
+    batch = build_inventory_update_batch(
+        wix_export_csv=wix_csv,
+        diamond_csv=diamond_csv,
+        brands=["Thomas Sabo"],
+    )
+    rows_by_sku = {row["sku"]: row for row in batch.rows}
+
+    assert batch.new_product_count == 2
+    assert rows_by_sku["W2"]["categorySlugs"] == (
+        "uhren;herrenuhren;thomas-sabo-uhren;bremgarten;bremgarten-uhren"
+    )
+    assert rows_by_sku["W2"]["primaryCategorySlug"] == "uhren"
+    assert rows_by_sku["J2"]["categorySlugs"] == (
+        "schmuck;ringe;thomas-sabo;zofingen;zofingen-schmuck"
+    )
+    assert rows_by_sku["J2"]["primaryCategorySlug"] == "schmuck"
+
+
+def test_build_inventory_update_batch_removes_locations_from_out_of_stock_products(
+    tmp_path: Path,
+) -> None:
+    diamond_csv = tmp_path / "lager.csv"
+    diamond_csv.write_text(
+        "Filiale;Kategorie;Marke;Artikel Nr;Menge\n"
+        "Am Bogen;Uhr;Brand;A1;0\n",
+        encoding="utf-8",
+    )
+
+    wix_csv = tmp_path / "catalog_products.csv"
+    wix_csv.write_text(
+        "handle,fieldType,name,brand,categorySlugs,primaryCategorySlug,inventory,sku\n"
+        "one,PRODUCT,Alpha,Brand,uhren;bremgarten;zofingen;bremgarten-uhren;zofingen-uhren;brand,uhren,3,A1\n"
+        "two,PRODUCT,Beta,Brand,schmuck;zofingen;bremgarten-schmuck;zofingen-schmuck;brand,schmuck,1,A2\n",
         encoding="utf-8",
     )
 

@@ -4,7 +4,14 @@ from collections.abc import MutableMapping, Sequence
 import re
 
 from .models import ConversionOptions, DiamondRecord, Severity, ValidationIssue
-from .normalize import format_decimal, make_handle, normalize_inventory, normalize_text, parse_decimal
+from .normalize import (
+    format_decimal,
+    make_handle,
+    normalize_inventory,
+    normalize_text,
+    parse_decimal,
+    parse_quantity,
+)
 
 _WORD_RE = re.compile(r"[^\W_]+", flags=re.UNICODE)
 _AM_BOGEN_AVAILABILITY = "Verfügbar in der Bijouterie am Bogen in Bremgarten AG"
@@ -20,6 +27,27 @@ _LOCATION_CATEGORY_SLUGS = (
 _MANAGED_LOCATION_CATEGORY_SLUGS = frozenset(
     slug for _, slug in _LOCATION_CATEGORY_SLUGS
 )
+_SCOPED_LOCATION_CATEGORY_SLUGS = {
+    "uhren": {
+        "bremgarten": "bremgarten-uhren",
+        "zofingen": "zofingen-uhren",
+    },
+    "schmuck": {
+        "bremgarten": "bremgarten-schmuck",
+        "zofingen": "zofingen-schmuck",
+    },
+}
+_MANAGED_SCOPED_LOCATION_CATEGORY_SLUGS = frozenset(
+    scoped_slug
+    for scoped_slugs in _SCOPED_LOCATION_CATEGORY_SLUGS.values()
+    for scoped_slug in scoped_slugs.values()
+)
+_SCOPED_BRAND_CATEGORY_SLUGS = {
+    "thomas sabo": {
+        "uhren": "thomas-sabo-uhren",
+        "schmuck": "thomas-sabo",
+    },
+}
 _KNOWN_AVAILABILITY_SENTENCES = (
     _AM_BOGEN_AVAILABILITY,
     _DROZ_AVAILABILITY,
@@ -148,7 +176,7 @@ def _build_plain_description(record: DiamondRecord) -> str:
         if referenz:
             items.append(f"Referenz: {referenz}")
 
-        branch_names = [normalize_text(part) for part in record.data.get("Filiale", "").split("|")]
+        branch_names = _available_branches(record)
         availability = availability_sentence_from_branches(branch_names)
         if availability:
             items.append(availability)
@@ -212,14 +240,60 @@ def _category_slugs_for_value(value: str | None) -> list[str]:
     return [slug] if slug else []
 
 
-def _brand_category_slug(value: str | None) -> str:
-    """Build the brand category slug, preserving specific Wix-facing labels."""
+def _brand_category_slug(
+    value: str | None,
+    broad_category_slug: str = "",
+) -> str:
+    """Build the globally unique brand slug for a Wix category branch."""
     brand = normalize_text(value)
     if not brand:
         return ""
+
+    scoped_slugs = _SCOPED_BRAND_CATEGORY_SLUGS.get(brand.casefold(), {})
+    scoped_slug = scoped_slugs.get(broad_category_slug)
+    if scoped_slug:
+        return scoped_slug
     if brand == "Eichmüller":
         return "eichmüller"
     return make_handle(brand, prefix="")
+
+
+def merge_scoped_brand_category_slug(
+    category_slugs: str | None,
+    brand: str | None,
+    category: str | None,
+) -> str:
+    """Reconcile brand slugs whose Wix category depends on their parent branch."""
+    current = category_slugs or ""
+    scoped_slugs = _SCOPED_BRAND_CATEGORY_SLUGS.get(
+        normalize_text(brand).casefold()
+    )
+    broad_slugs = _category_slugs_for_value(category)
+    broad = broad_slugs[0] if broad_slugs else ""
+    if not scoped_slugs or broad not in scoped_slugs:
+        return current
+
+    expected = scoped_slugs[broad]
+    managed = frozenset(slug.casefold() for slug in scoped_slugs.values())
+    reconciled: list[str] = []
+    found_expected = False
+
+    for raw_slug in current.split(";"):
+        slug = normalize_text(raw_slug)
+        if not slug:
+            continue
+
+        slug_key = slug.casefold()
+        if slug_key not in managed:
+            reconciled.append(slug)
+            continue
+        if slug_key == expected.casefold() and not found_expected:
+            reconciled.append(expected)
+            found_expected = True
+
+    if not found_expected:
+        reconciled.append(expected)
+    return ";".join(reconciled)
 
 
 def availability_sentence_from_branches(branches: Sequence[str]) -> str:
@@ -239,9 +313,10 @@ def _branch_keys(branches: Sequence[str]) -> set[str]:
     """Map branch labels to the storefront locations they represent."""
     seen: set[str] = set()
     for raw_branch in branches:
-        branch = _branch_key(raw_branch)
-        if branch:
-            seen.add(branch)
+        for branch_part in raw_branch.split("|"):
+            branch = _branch_key(branch_part)
+            if branch:
+                seen.add(branch)
     return seen
 
 
@@ -255,18 +330,50 @@ def location_category_slugs_from_branches(branches: Sequence[str]) -> tuple[str,
     )
 
 
+def scoped_location_category_slugs_from_branches(
+    branches: Sequence[str],
+    broad_category_slug: str,
+) -> tuple[str, ...]:
+    """Return the location slugs belonging below a broad Wix category."""
+    scoped_slugs = _SCOPED_LOCATION_CATEGORY_SLUGS.get(broad_category_slug, {})
+    return tuple(
+        scoped_slugs[location_slug]
+        for location_slug in location_category_slugs_from_branches(branches)
+        if location_slug in scoped_slugs
+    )
+
+
 def merge_location_category_slugs(
     category_slugs: str | None,
     branches: Sequence[str],
+    category: str | None = None,
 ) -> str:
     """Replace managed location slugs while preserving all other categories."""
+    managed_slugs = (
+        _MANAGED_LOCATION_CATEGORY_SLUGS
+        | _MANAGED_SCOPED_LOCATION_CATEGORY_SLUGS
+    )
     existing: list[str] = []
     for raw_slug in (category_slugs or "").split(";"):
         slug = normalize_text(raw_slug)
-        if slug and slug.casefold() not in _MANAGED_LOCATION_CATEGORY_SLUGS:
+        if slug and slug.casefold() not in managed_slugs:
             existing.append(slug)
 
-    return ";".join([*existing, *location_category_slugs_from_branches(branches)])
+    broad_slugs = _category_slugs_for_value(category)
+    broad = next(
+        (slug for slug in broad_slugs if slug in _SCOPED_LOCATION_CATEGORY_SLUGS),
+        "",
+    )
+    if not broad:
+        for raw_slug in (category_slugs or "").split(";"):
+            candidate = normalize_text(raw_slug).casefold()
+            if candidate in _SCOPED_LOCATION_CATEGORY_SLUGS:
+                broad = candidate
+                break
+
+    location_slugs = location_category_slugs_from_branches(branches)
+    scoped_slugs = scoped_location_category_slugs_from_branches(branches, broad)
+    return ";".join([*existing, *location_slugs, *scoped_slugs])
 
 
 def _branch_key(value: str | None) -> str:
@@ -277,6 +384,21 @@ def _branch_key(value: str | None) -> str:
     if "droz" in branch:
         return "Droz"
     return ""
+
+
+def _available_branches(record: DiamondRecord) -> list[str]:
+    """Return branches only when the source row represents positive stock."""
+    try:
+        quantity = parse_quantity(record.data.get("Menge"))
+    except ValueError:
+        return []
+    if not quantity or quantity <= 0:
+        return []
+    return [
+        normalize_text(part)
+        for part in record.data.get("Filiale", "").split("|")
+        if normalize_text(part)
+    ]
 
 
 def _remove_availability_tail(text: str) -> str:
@@ -338,11 +460,19 @@ def _build_category_slugs(record: DiamondRecord) -> tuple[str, str]:
     broad_slugs = _category_slugs_for_value(record.data.get("Kategorie"))
     broad = broad_slugs[0] if broad_slugs else ""
     fine_slugs = _category_slugs_for_value(record.data.get("Warengruppe"))
-    brand = _brand_category_slug(record.data.get("Marke"))
+    brand = _brand_category_slug(record.data.get("Marke"), broad)
 
     slugs: list[str] = []
     for slug in [*broad_slugs, *fine_slugs, brand]:
         if slug and slug not in slugs:
+            slugs.append(slug)
+
+    branches = _available_branches(record)
+    for slug in [
+        *location_category_slugs_from_branches(branches),
+        *scoped_location_category_slugs_from_branches(branches, broad),
+    ]:
+        if slug not in slugs:
             slugs.append(slug)
 
     return broad, ";".join(slugs)

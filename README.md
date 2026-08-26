@@ -12,6 +12,7 @@ The converter is intentionally small: it reads DIAMOND-style `.csv` files, maps 
 - Merges duplicate product rows by article number, with reference as fallback
 - Aggregates inventory when duplicate rows describe the same product
 - Maps source data into Wix `PRODUCT` rows
+- Maps parent-scoped Wix brand categories, including separate Thomas Sabo watch and jewelry slugs
 - Validates required Wix fields
 - Writes a German issue report for errors and warnings
 - Updates inventory, availability text, and store categories in an existing Wix product export from a newer DIAMOND inventory export
@@ -101,7 +102,27 @@ python -m zeitshop_converter.main update \
   --output out/catalog_products_inventory_update.csv
 ```
 
-Update mode changes the Wix `inventory` column, the availability sentence in `plainDescription`, and the location categories in `categorySlugs` for configured brands. Matched products get the summed DIAMOND quantity and, from positive-stock DIAMOND rows, the current availability text plus the `bremgarten`, `zofingen`, or both location slugs. Existing non-location categories keep their order. When a product moves or is no longer available, outdated location slugs are removed. `primaryCategorySlug`, `MEDIA` rows, and all unrelated fields remain unchanged. Wix product rows whose brand is not in the configured list are treated as unmanaged additional-import products and are preserved unchanged.
+Category slugs reflect Wix's globally unique category tree: Thomas Sabo watches use `thomas-sabo-uhren` below `uhren`, while Thomas Sabo jewelry uses `thomas-sabo` below `schmuck`. This applies to normal conversions and products created during update mode.
+
+Update mode changes the Wix `inventory` column, the availability sentence in `plainDescription`, and managed entries in `categorySlugs` for configured brands. Matched products get the summed DIAMOND quantity and, from positive-stock DIAMOND rows, the current availability text plus the broad `bremgarten`, `zofingen`, or both location slugs. They also get the matching category-specific location slugs:
+
+- watches: `bremgarten-uhren` and/or `zofingen-uhren`
+- jewelry: `bremgarten-schmuck` and/or `zofingen-schmuck`
+
+Normal import mode applies the same positive-stock location mapping. Update mode also corrects stale or duplicate Thomas Sabo branch slugs from the DIAMOND broad category. Existing unrelated categories keep their order. When a product moves, changes between watches and jewelry, or is no longer available, all outdated managed location slugs are removed. `primaryCategorySlug`, `MEDIA` rows, and all unrelated fields remain unchanged. Wix product rows whose brand is not in the configured list are treated as unmanaged additional-import products and are preserved unchanged.
+
+The converter assigns products to existing categories; it does not create the Wix category tree. Before importing, create these four Wix categories with the exact slugs and place them as follows:
+
+```text
+Uhren (uhren)
+  Bremgarten (bremgarten-uhren)
+  Zofingen (zofingen-uhren)
+Schmuck (schmuck)
+  Bremgarten (bremgarten-schmuck)
+  Zofingen (zofingen-schmuck)
+```
+
+Keep the existing top-level `bremgarten` and `zofingen` categories as well. Wix stores the parent-child relationship in its category tree; the product CSV only contains the globally unique slugs.
 
 DIAMOND products missing from the Wix export are converted into new Wix product rows and shown at the top of the update preview as `Neu`. These new products should be checked manually in Wix after import. In update mode, the `Beschreibung hinzufügen` button can load a DIAMOND report CSV and adds report descriptions only to those new rows.
 

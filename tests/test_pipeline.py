@@ -120,6 +120,115 @@ def test_pipeline_maps_kategorie_and_warengruppe_to_wix_categories() -> None:
     assert batch.valid_rows[0]["categorySlugs"] == "uhren;herrenuhren;brand"
 
 
+@pytest.mark.parametrize(
+    ("branch", "category", "product_type", "expected_category_slugs"),
+    [
+        pytest.param(
+            "Am Bogen",
+            "Uhr",
+            "Herrenuhr",
+            "uhren;herrenuhren;brand;bremgarten;bremgarten-uhren",
+            id="bremgarten-watch",
+        ),
+        pytest.param(
+            "Droz",
+            "Uhr",
+            "Herrenuhr",
+            "uhren;herrenuhren;brand;zofingen;zofingen-uhren",
+            id="zofingen-watch",
+        ),
+        pytest.param(
+            "Am Bogen",
+            "Schmuck",
+            "Ring",
+            "schmuck;ringe;brand;bremgarten;bremgarten-schmuck",
+            id="bremgarten-jewelry",
+        ),
+        pytest.param(
+            "Droz",
+            "Schmuck",
+            "Ring",
+            "schmuck;ringe;brand;zofingen;zofingen-schmuck",
+            id="zofingen-jewelry",
+        ),
+    ],
+)
+def test_pipeline_adds_broad_and_scoped_location_categories(
+    branch: str,
+    category: str,
+    product_type: str,
+    expected_category_slugs: str,
+) -> None:
+    records = [
+        DiamondRecord(
+            source_row=2,
+            source_format="lager_csv",
+            data={
+                "Artikel Nr": "123",
+                "Referenz": "R-1",
+                "Filiale": branch,
+                "Marke": "Brand",
+                "Produktlinie": "Line",
+                "Kurzbeschreibung": "Product",
+                "Verkauf": "99",
+                "Einstand": "40.50",
+                "Menge": "1",
+                "Warengruppe": product_type,
+                "Kategorie": category,
+            },
+        )
+    ]
+
+    batch = convert_records(records, _template_header(), ConversionOptions())
+
+    assert batch.valid_rows[0]["categorySlugs"] == expected_category_slugs
+
+
+@pytest.mark.parametrize(
+    ("category", "product_type", "expected_category_slugs"),
+    [
+        pytest.param(
+            "Uhr",
+            "Herrenuhr",
+            "uhren;herrenuhren;thomas-sabo-uhren",
+            id="watch",
+        ),
+        pytest.param(
+            "Schmuck",
+            "Ring",
+            "schmuck;ringe;thomas-sabo",
+            id="jewelry",
+        ),
+    ],
+)
+def test_pipeline_scopes_thomas_sabo_brand_category_to_parent(
+    category: str,
+    product_type: str,
+    expected_category_slugs: str,
+) -> None:
+    records = [
+        DiamondRecord(
+            source_row=2,
+            data={
+                "Artikel Nr": "123",
+                "Referenz": "R-1",
+                "Marke": "Thomas Sabo",
+                "Produktlinie": "Line",
+                "Kurzbeschreibung": "Product",
+                "Verkauf": "99",
+                "Einstand": "40.50",
+                "Menge": "1",
+                "Warengruppe": product_type,
+                "Kategorie": category,
+            },
+        )
+    ]
+
+    batch = convert_records(records, _template_header(), ConversionOptions())
+
+    assert batch.valid_rows[0]["categorySlugs"] == expected_category_slugs
+
+
 def test_pipeline_normalizes_mixed_herren_damen_category_syntax() -> None:
     records = [
         DiamondRecord(
@@ -300,6 +409,8 @@ def test_pipeline_merges_lager_branches_into_combined_availability_text() -> Non
                 "Verkauf": "10",
                 "Einstand": "5",
                 "Menge": "1",
+                "Warengruppe": "Herrenuhr",
+                "Kategorie": "Uhr",
             },
         ),
         DiamondRecord(
@@ -315,6 +426,8 @@ def test_pipeline_merges_lager_branches_into_combined_availability_text() -> Non
                 "Verkauf": "10",
                 "Einstand": "5",
                 "Menge": "2",
+                "Warengruppe": "Herrenuhr",
+                "Kategorie": "Uhr",
             },
         ),
     ]
@@ -326,6 +439,60 @@ def test_pipeline_merges_lager_branches_into_combined_availability_text() -> Non
         batch.results[0].wix_row["plainDescription"]
         == "Referenz: REF-1\nVerfügbar in der Bijouterie am Bogen in Bremgarten AG "
         "und in der Bijouterie Droz in Zofingen AG"
+    )
+    assert batch.results[0].wix_row["categorySlugs"] == (
+        "uhren;herrenuhren;brand;bremgarten;zofingen;"
+        "bremgarten-uhren;zofingen-uhren"
+    )
+
+
+def test_pipeline_ignores_zero_stock_branches_for_availability_and_categories() -> None:
+    records = [
+        DiamondRecord(
+            source_row=2,
+            source_format="lager_csv",
+            data={
+                "Artikel Nr": "DUP-1",
+                "Referenz": "REF-1",
+                "Filiale": "Am Bogen",
+                "Marke": "Brand",
+                "Produktlinie": "Line",
+                "Kurzbeschreibung": "",
+                "Verkauf": "10",
+                "Einstand": "5",
+                "Menge": "1",
+                "Warengruppe": "Herrenuhr",
+                "Kategorie": "Uhr",
+            },
+        ),
+        DiamondRecord(
+            source_row=3,
+            source_format="lager_csv",
+            data={
+                "Artikel Nr": "DUP-1",
+                "Referenz": "REF-1",
+                "Filiale": "Droz",
+                "Marke": "Brand",
+                "Produktlinie": "Line",
+                "Kurzbeschreibung": "",
+                "Verkauf": "10",
+                "Einstand": "5",
+                "Menge": "0",
+                "Warengruppe": "Herrenuhr",
+                "Kategorie": "Uhr",
+            },
+        ),
+    ]
+
+    batch = convert_records(records, _template_header(), ConversionOptions())
+    row = batch.valid_rows[0]
+
+    assert row["inventory"] == "1"
+    assert row["plainDescription"] == (
+        "Referenz: REF-1\nVerfügbar in der Bijouterie am Bogen in Bremgarten AG"
+    )
+    assert row["categorySlugs"] == (
+        "uhren;herrenuhren;brand;bremgarten;bremgarten-uhren"
     )
 
 

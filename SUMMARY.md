@@ -102,7 +102,7 @@ zeitshop-converter update \
 
 `update-inventory` is accepted as an alias for `update`.
 
-The update mode matches configured-brand Wix product rows by `sku` against DIAMOND `Artikel Nr`, updates the Wix `inventory` column, replaces known availability sentences in `plainDescription`, and reconciles the `bremgarten` and `zofingen` entries in `categorySlugs`. Matching rows get the summed DIAMOND quantity and current Am Bogen/Droz availability from positive-stock DIAMOND rows. Products that move or become unavailable lose outdated location slugs while retaining all other categories; `primaryCategorySlug` and `MEDIA` rows stay unchanged. Configured-brand Wix products missing from the DIAMOND update are set to `0`; unmanaged Wix rows whose brand is not configured are preserved unchanged; DIAMOND products missing from the Wix export are converted into new Wix product rows.
+The update mode matches configured-brand Wix product rows by `sku` against DIAMOND `Artikel Nr`, updates the Wix `inventory` column, replaces known availability sentences in `plainDescription`, and reconciles managed entries in `categorySlugs`. Matching rows get the summed DIAMOND quantity and current Am Bogen/Droz availability from positive-stock DIAMOND rows. In addition to the broad `bremgarten` and `zofingen` slugs, watches use `bremgarten-uhren` / `zofingen-uhren` and jewelry uses `bremgarten-schmuck` / `zofingen-schmuck`. Products that move, change broad category, or become unavailable lose outdated managed location slugs. Thomas Sabo products use the globally unique slug for their DIAMOND branch: `thomas-sabo-uhren` below `uhren` and `thomas-sabo` below `schmuck`. Unrelated categories, `primaryCategorySlug`, and `MEDIA` rows stay unchanged. Configured-brand Wix products missing from the DIAMOND update are set to `0`; unmanaged Wix rows whose brand is not configured are preserved unchanged; DIAMOND products missing from the Wix export are converted into new Wix product rows.
 
 ## Conversion Flow
 
@@ -155,8 +155,8 @@ Key behaviors:
 - product names are built from brand, product line, and short description while avoiding repeated words;
 - duplicate handles are deduplicated with numeric suffixes;
 - inventory can be numeric or stock enum during import conversion;
-- category slugs are normalized from DIAMOND category values;
-- branch availability sentences are generated for known branches.
+- category slugs are normalized from DIAMOND category values, with globally unique parent-scoped slugs for brands that occur in multiple branches;
+- branch availability sentences and broad/scoped store category slugs are generated from positive stock at known branches.
 
 Validation lives in `core/validation.py`.
 
@@ -183,14 +183,15 @@ The updater:
 - merges positive-stock branches by `Artikel Nr`;
 - updates matching Wix product rows by `sku`;
 - sets unmatched Wix product rows to `0`;
-- reconciles `bremgarten` and `zofingen` in `categorySlugs` from positive-stock branch data;
+- reconciles `bremgarten`, `zofingen`, and their `uhren` / `schmuck` child slugs in `categorySlugs` from positive-stock branch data;
+- reconciles `thomas-sabo-uhren` and `thomas-sabo` from the DIAMOND `Uhr`/`Schmuck` branch;
 - converts DIAMOND products missing from Wix into new product rows;
 - pins new product rows to the top of the GUI update preview;
 - can enrich only those new rows from a DIAMOND report CSV through `Beschreibung hinzufügen`;
 - replaces old or new known availability sentences in `plainDescription` with the current canonical wording;
 - blocks export when either file is missing a configured brand or the DIAMOND update contains a brand outside the configured list;
 - preserves unmanaged Wix rows whose brand is outside the configured list;
-- preserves non-location categories, `primaryCategorySlug`, non-product rows, and every Wix field except `inventory`, `plainDescription`, and `categorySlugs` unchanged.
+- preserves unrelated categories, `primaryCategorySlug`, non-product rows, and every Wix field except `inventory`, `plainDescription`, and managed `categorySlugs` unchanged.
 
 ## Windows Installation
 
