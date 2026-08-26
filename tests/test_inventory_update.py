@@ -159,6 +159,133 @@ def test_build_inventory_update_batch_updates_html_availability_descriptions(
     assert batch.rows[1]["plainDescription"].count("Verfügbar") == 0
 
 
+@pytest.mark.parametrize(
+    ("diamond_rows", "expected_category_slugs"),
+    [
+        pytest.param(
+            "Am Bogen;Brand;A1;1\n",
+            "uhren;brand;bremgarten",
+            id="bremgarten",
+        ),
+        pytest.param(
+            "Droz;Brand;A1;1\n",
+            "uhren;brand;zofingen",
+            id="zofingen",
+        ),
+        pytest.param(
+            "Droz;Brand;A1;1\nAm Bogen;Brand;A1;2\n",
+            "uhren;brand;bremgarten;zofingen",
+            id="both-stores",
+        ),
+    ],
+)
+def test_build_inventory_update_batch_adds_current_location_categories(
+    tmp_path: Path,
+    diamond_rows: str,
+    expected_category_slugs: str,
+) -> None:
+    diamond_csv = tmp_path / "lager.csv"
+    diamond_csv.write_text(
+        "Filiale;Marke;Artikel Nr;Menge\n" + diamond_rows,
+        encoding="utf-8",
+    )
+
+    wix_csv = tmp_path / "catalog_products.csv"
+    wix_csv.write_text(
+        "handle,fieldType,name,brand,categorySlugs,primaryCategorySlug,inventory,sku\n"
+        "one,PRODUCT,Alpha,Brand,uhren;brand,uhren,9,A1\n",
+        encoding="utf-8",
+    )
+
+    batch = build_inventory_update_batch(
+        wix_export_csv=wix_csv,
+        diamond_csv=diamond_csv,
+        brands=["Brand"],
+    )
+
+    assert batch.rows[0]["categorySlugs"] == expected_category_slugs
+    assert batch.rows[0]["primaryCategorySlug"] == "uhren"
+
+
+def test_build_inventory_update_batch_replaces_location_category_after_move(
+    tmp_path: Path,
+) -> None:
+    diamond_csv = tmp_path / "lager.csv"
+    diamond_csv.write_text(
+        "Filiale;Marke;Artikel Nr;Menge\n"
+        "Droz;Brand;A1;2\n",
+        encoding="utf-8",
+    )
+
+    wix_csv = tmp_path / "catalog_products.csv"
+    wix_csv.write_text(
+        "handle,fieldType,name,brand,plainDescription,categorySlugs,primaryCategorySlug,inventory,sku,ribbon\n"
+        'one,PRODUCT,Alpha,Brand,"Specs\nVerfügbar in der Bijouterie am Bogen in Bremgarten AG",uhren;bremgarten;aktionen,uhren,9,A1,Bestseller\n'
+        "one,MEDIA,Media,Brand,Media text,media;bremgarten,media-primary,media-stock,A1,Media ribbon\n",
+        encoding="utf-8",
+    )
+
+    batch = build_inventory_update_batch(
+        wix_export_csv=wix_csv,
+        diamond_csv=diamond_csv,
+        brands=["Brand"],
+    )
+
+    assert batch.rows[0]["categorySlugs"] == "uhren;aktionen;zofingen"
+    assert batch.rows[0]["primaryCategorySlug"] == "uhren"
+    assert batch.rows[0]["ribbon"] == "Bestseller"
+    assert batch.rows[0]["plainDescription"] == (
+        "Specs\nVerfügbar in der Bijouterie Droz in Zofingen AG"
+    )
+    assert batch.rows[1] == {
+        "handle": "one",
+        "fieldType": "MEDIA",
+        "name": "Media",
+        "brand": "Brand",
+        "plainDescription": "Media text",
+        "categorySlugs": "media;bremgarten",
+        "primaryCategorySlug": "media-primary",
+        "inventory": "media-stock",
+        "sku": "A1",
+        "ribbon": "Media ribbon",
+    }
+
+
+def test_build_inventory_update_batch_removes_locations_from_out_of_stock_products(
+    tmp_path: Path,
+) -> None:
+    diamond_csv = tmp_path / "lager.csv"
+    diamond_csv.write_text(
+        "Filiale;Marke;Artikel Nr;Menge\n"
+        "Am Bogen;Brand;A1;0\n",
+        encoding="utf-8",
+    )
+
+    wix_csv = tmp_path / "catalog_products.csv"
+    wix_csv.write_text(
+        "handle,fieldType,name,brand,categorySlugs,primaryCategorySlug,inventory,sku\n"
+        "one,PRODUCT,Alpha,Brand,uhren;bremgarten;zofingen;brand,uhren,3,A1\n"
+        "two,PRODUCT,Beta,Brand,schmuck;zofingen;brand,schmuck,1,A2\n",
+        encoding="utf-8",
+    )
+
+    batch = build_inventory_update_batch(
+        wix_export_csv=wix_csv,
+        diamond_csv=diamond_csv,
+        brands=["Brand"],
+    )
+
+    assert [row["categorySlugs"] for row in batch.rows] == [
+        "uhren;brand",
+        "schmuck;brand",
+    ]
+    assert [row["primaryCategorySlug"] for row in batch.rows] == [
+        "uhren",
+        "schmuck",
+    ]
+    assert [row["inventory"] for row in batch.rows] == ["0", "0"]
+
+
 def test_build_inventory_update_batch_reads_semicolon_wix_export(
     tmp_path: Path,
 ) -> None:
@@ -322,8 +449,8 @@ def test_build_inventory_update_batch_creates_new_rows_for_unmatched_diamond_pro
 
     wix_csv = tmp_path / "catalog_products.csv"
     wix_csv.write_text(
-        "handle,fieldType,name,brand,plainDescription,price,cost,inventory,sku,barcode\n"
-        "one,PRODUCT,Alpha,Brand,Old,10,5,9,A1,R1\n",
+        "handle,fieldType,name,brand,plainDescription,categorySlugs,primaryCategorySlug,price,cost,inventory,sku,barcode\n"
+        "one,PRODUCT,Alpha,Brand,Old,brand,legacy-primary,10,5,9,A1,R1\n",
         encoding="utf-8",
     )
 
@@ -343,6 +470,8 @@ def test_build_inventory_update_batch_creates_new_rows_for_unmatched_diamond_pro
     assert batch.rows[1]["plainDescription"] == (
         "Verfügbar in der Bijouterie Droz in Zofingen AG"
     )
+    assert batch.rows[1]["categorySlugs"] == "brand;zofingen"
+    assert batch.rows[1]["primaryCategorySlug"] == ""
     assert batch.results[0].is_new_product is True
     assert batch.results[0].wix_row["sku"] == "A2"
     assert batch.results[1].is_new_product is False

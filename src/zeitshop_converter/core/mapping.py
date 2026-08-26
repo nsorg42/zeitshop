@@ -13,6 +13,13 @@ _BOTH_BRANCHES_AVAILABILITY = (
     "Verfügbar in der Bijouterie am Bogen in Bremgarten AG "
     "und in der Bijouterie Droz in Zofingen AG"
 )
+_LOCATION_CATEGORY_SLUGS = (
+    ("Am Bogen", "bremgarten"),
+    ("Droz", "zofingen"),
+)
+_MANAGED_LOCATION_CATEGORY_SLUGS = frozenset(
+    slug for _, slug in _LOCATION_CATEGORY_SLUGS
+)
 _KNOWN_AVAILABILITY_SENTENCES = (
     _AM_BOGEN_AVAILABILITY,
     _DROZ_AVAILABILITY,
@@ -217,19 +224,49 @@ def _brand_category_slug(value: str | None) -> str:
 
 def availability_sentence_from_branches(branches: Sequence[str]) -> str:
     """Build the storefront availability sentence from current branch stock."""
-    seen: list[str] = []
-    for raw_branch in branches:
-        branch = _branch_key(raw_branch)
-        if branch and branch not in seen:
-            seen.append(branch)
+    seen = _branch_keys(branches)
 
-    if seen == ["Am Bogen"]:
+    if seen == {"Am Bogen"}:
         return _AM_BOGEN_AVAILABILITY
-    if seen == ["Droz"]:
+    if seen == {"Droz"}:
         return _DROZ_AVAILABILITY
-    if set(seen) == {"Am Bogen", "Droz"}:
+    if seen == {"Am Bogen", "Droz"}:
         return _BOTH_BRANCHES_AVAILABILITY
     return ""
+
+
+def _branch_keys(branches: Sequence[str]) -> set[str]:
+    """Map branch labels to the storefront locations they represent."""
+    seen: set[str] = set()
+    for raw_branch in branches:
+        branch = _branch_key(raw_branch)
+        if branch:
+            seen.add(branch)
+    return seen
+
+
+def location_category_slugs_from_branches(branches: Sequence[str]) -> tuple[str, ...]:
+    """Return Wix location slugs using the availability branch mapping."""
+    branch_keys = _branch_keys(branches)
+    return tuple(
+        slug
+        for branch, slug in _LOCATION_CATEGORY_SLUGS
+        if branch in branch_keys
+    )
+
+
+def merge_location_category_slugs(
+    category_slugs: str | None,
+    branches: Sequence[str],
+) -> str:
+    """Replace managed location slugs while preserving all other categories."""
+    existing: list[str] = []
+    for raw_slug in (category_slugs or "").split(";"):
+        slug = normalize_text(raw_slug)
+        if slug and slug.casefold() not in _MANAGED_LOCATION_CATEGORY_SLUGS:
+            existing.append(slug)
+
+    return ";".join([*existing, *location_category_slugs_from_branches(branches)])
 
 
 def _branch_key(value: str | None) -> str:

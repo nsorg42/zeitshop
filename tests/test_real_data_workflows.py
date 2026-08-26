@@ -1,6 +1,8 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from zeitshop_converter.conversion import convert_diamond_file
 from zeitshop_converter.core.normalize import normalize_text, parse_quantity
 from zeitshop_converter.gui.app import ConverterApp
@@ -9,6 +11,18 @@ from zeitshop_converter.io import read_diamond_file, read_report_description_csv
 
 
 TESTING_DATA = Path(__file__).resolve().parents[1] / "testing_data"
+REQUIRED_SAMPLE_FILES = (
+    "catalog_productswix.csv",
+    "saboinf.csv",
+    "sabotab.csv",
+    "uhrinfo.csv",
+    "uhrtab.csv",
+    "uhrtab_wix_import.csv",
+)
+requires_local_samples = pytest.mark.skipif(
+    not all((TESTING_DATA / name).exists() for name in REQUIRED_SAMPLE_FILES),
+    reason="local testing_data CSV samples are not committed",
+)
 WATCH_BRANDS = [
     "Aerowatch",
     "Certina",
@@ -63,6 +77,7 @@ def _assert_import_batch_shape(batch) -> None:
     )
 
 
+@requires_local_samples
 def test_sample_sabo_import_and_report_description_files_are_readable() -> None:
     batch = convert_diamond_file(TESTING_DATA / "sabotab.csv")
     report_descriptions = read_report_description_csv(TESTING_DATA / "saboinf.csv")
@@ -75,6 +90,7 @@ def test_sample_sabo_import_and_report_description_files_are_readable() -> None:
         assert description.beschreibung
 
 
+@requires_local_samples
 def test_sample_watch_import_merges_rows_and_uses_new_availability_text() -> None:
     records = read_diamond_file(TESTING_DATA / "uhrtab.csv")
     batch = convert_diamond_file(TESTING_DATA / "uhrtab.csv")
@@ -97,6 +113,7 @@ def test_sample_watch_import_merges_rows_and_uses_new_availability_text() -> Non
         assert by_sku[sku]["inventory"] == str(expected_inventory[sku])
 
 
+@requires_local_samples
 def test_sample_update_round_trip_against_matching_wix_import(tmp_path: Path) -> None:
     batch = build_inventory_update_batch(
         wix_export_csv=TESTING_DATA / "uhrtab_wix_import.csv",
@@ -131,6 +148,7 @@ def test_sample_update_round_trip_against_matching_wix_import(tmp_path: Path) ->
     assert "Verfügbar in der Bijouterie" in written
 
 
+@requires_local_samples
 def test_sample_update_report_descriptions_only_touch_new_rows() -> None:
     batch = build_inventory_update_batch(
         wix_export_csv=TESTING_DATA / "catalog_productswix.csv",

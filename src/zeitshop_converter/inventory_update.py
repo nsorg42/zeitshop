@@ -18,7 +18,10 @@ from .core import (
     convert_records,
 )
 from .core.barcodes import ensure_unique_product_barcodes
-from .core.mapping import merge_availability_into_description
+from .core.mapping import (
+    merge_availability_into_description,
+    merge_location_category_slugs,
+)
 from .core.normalize import make_handle, normalize_text, parse_quantity
 from .io import read_diamond_file
 from .io.detect import detect_encoding, sniff_dialect
@@ -28,9 +31,11 @@ _REQUIRED_WIX_EXPORT_COLUMNS = {"brand", "inventory", "sku"}
 _EXCEL_QUOTED_FORMULA_PREFIX = '="'
 _WIX_EXPORT_COLUMN_ALIASES = {
     "brand": "brand",
+    "categoryslugs": "categorySlugs",
     "fieldtype": "fieldType",
     "inventory": "inventory",
     "plaindescription": "plainDescription",
+    "primarycategoryslug": "primaryCategorySlug",
     "sku": "sku",
 }
 
@@ -451,6 +456,8 @@ def build_inventory_update_batch(
         new_inventory = old_inventory
         old_description = row.get("plainDescription", "")
         new_description = old_description
+        old_category_slugs = row.get("categorySlugs", "")
+        new_category_slugs = old_category_slugs
         set_to_zero = False
 
         if is_managed_product:
@@ -460,13 +467,19 @@ def build_inventory_update_batch(
                 new_inventory = "0"
                 set_to_zero = True
             row["inventory"] = new_inventory
+            branches = snapshot.branches if matched and snapshot is not None else ()
             if "plainDescription" in row:
-                branches = snapshot.branches if matched and snapshot is not None else ()
                 new_description = merge_availability_into_description(
                     old_description,
                     branches,
                 )
                 row["plainDescription"] = new_description
+            if "categorySlugs" in row:
+                new_category_slugs = merge_location_category_slugs(
+                    old_category_slugs,
+                    branches,
+                )
+                row["categorySlugs"] = new_category_slugs
 
         updated_rows.append(row)
 
@@ -482,6 +495,7 @@ def build_inventory_update_batch(
                     changed=(
                         new_inventory != old_inventory
                         or new_description != old_description
+                        or new_category_slugs != old_category_slugs
                     ),
                     set_to_zero=set_to_zero,
                     source_kind=source_kind,
@@ -501,10 +515,16 @@ def build_inventory_update_batch(
         row = dict(result.wix_row)
         sku = _inventory_match_key(row.get("sku"))
         snapshot = inventory_by_sku.get(sku)
+        branches = snapshot.branches if snapshot is not None else ()
         if "plainDescription" in row:
             row["plainDescription"] = merge_availability_into_description(
                 row.get("plainDescription", ""),
-                snapshot.branches if snapshot is not None else (),
+                branches,
+            )
+        if "categorySlugs" in row:
+            row["categorySlugs"] = merge_location_category_slugs(
+                row.get("categorySlugs", ""),
+                branches,
             )
         inventory = normalize_text(row.get("inventory"))
         new_results.append(

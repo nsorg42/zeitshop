@@ -72,7 +72,7 @@ zeitshop-converter gui
 It has two modes:
 
 - `Import`: choose a DIAMOND CSV, convert it, optionally edit selected fields, save the Wix import CSV, and save issue reports.
-- `Update`: choose a Wix product export plus a newer DIAMOND inventory CSV, update inventory and availability text, and save the updated Wix CSV after fixed-brand safety checks pass.
+- `Update`: choose a Wix product export plus a newer DIAMOND inventory CSV, update inventory, availability text, and store categories, and save the updated Wix CSV after fixed-brand safety checks pass.
 - `Einstellungen`: configure import defaults and edit the fixed update-mode brand list.
 
 ### CLI Conversion
@@ -102,7 +102,7 @@ zeitshop-converter update \
 
 `update-inventory` is accepted as an alias for `update`.
 
-The update mode matches configured-brand Wix product rows by `sku` against DIAMOND `Artikel Nr`, updates the Wix `inventory` column, and replaces known availability sentences in `plainDescription`. Matching rows get the summed DIAMOND quantity and current Am Bogen/Droz availability from positive-stock DIAMOND rows; configured-brand Wix products missing from the DIAMOND update are set to `0` and lose known availability text; unmanaged Wix rows whose brand is not configured are preserved unchanged; DIAMOND products missing from the Wix export are converted into new Wix product rows.
+The update mode matches configured-brand Wix product rows by `sku` against DIAMOND `Artikel Nr`, updates the Wix `inventory` column, replaces known availability sentences in `plainDescription`, and reconciles the `bremgarten` and `zofingen` entries in `categorySlugs`. Matching rows get the summed DIAMOND quantity and current Am Bogen/Droz availability from positive-stock DIAMOND rows. Products that move or become unavailable lose outdated location slugs while retaining all other categories; `primaryCategorySlug` and `MEDIA` rows stay unchanged. Configured-brand Wix products missing from the DIAMOND update are set to `0`; unmanaged Wix rows whose brand is not configured are preserved unchanged; DIAMOND products missing from the Wix export are converted into new Wix product rows.
 
 ## Conversion Flow
 
@@ -183,13 +183,14 @@ The updater:
 - merges positive-stock branches by `Artikel Nr`;
 - updates matching Wix product rows by `sku`;
 - sets unmatched Wix product rows to `0`;
+- reconciles `bremgarten` and `zofingen` in `categorySlugs` from positive-stock branch data;
 - converts DIAMOND products missing from Wix into new product rows;
 - pins new product rows to the top of the GUI update preview;
 - can enrich only those new rows from a DIAMOND report CSV through `Beschreibung hinzufügen`;
 - replaces old or new known availability sentences in `plainDescription` with the current canonical wording;
 - blocks export when either file is missing a configured brand or the DIAMOND update contains a brand outside the configured list;
 - preserves unmanaged Wix rows whose brand is outside the configured list;
-- preserves non-product rows and every Wix field except `inventory` and `plainDescription` unchanged.
+- preserves non-location categories, `primaryCategorySlug`, non-product rows, and every Wix field except `inventory`, `plainDescription`, and `categorySlugs` unchanged.
 
 ## Windows Installation
 

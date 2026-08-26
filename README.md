@@ -14,7 +14,7 @@ The converter is intentionally small: it reads DIAMOND-style `.csv` files, maps 
 - Maps source data into Wix `PRODUCT` rows
 - Validates required Wix fields
 - Writes a German issue report for errors and warnings
-- Updates inventory and availability text in an existing Wix product export from a newer DIAMOND inventory export
+- Updates inventory, availability text, and store categories in an existing Wix product export from a newer DIAMOND inventory export
 - Checks update exports against a configurable fixed brand list
 - Supports both a Tkinter GUI and a CLI
 
@@ -101,7 +101,7 @@ python -m zeitshop_converter.main update \
   --output out/catalog_products_inventory_update.csv
 ```
 
-Update mode changes the Wix `inventory` column and the availability sentence in `plainDescription` for configured brands. Matched products get the summed DIAMOND quantity and the current Am Bogen/Droz availability text from positive-stock DIAMOND rows. Wix products from configured brands that are missing from the DIAMOND export are set to `0` and their known availability sentence is removed. Wix product rows whose brand is not in the configured list are treated as unmanaged additional-import products and are preserved unchanged.
+Update mode changes the Wix `inventory` column, the availability sentence in `plainDescription`, and the location categories in `categorySlugs` for configured brands. Matched products get the summed DIAMOND quantity and, from positive-stock DIAMOND rows, the current availability text plus the `bremgarten`, `zofingen`, or both location slugs. Existing non-location categories keep their order. When a product moves or is no longer available, outdated location slugs are removed. `primaryCategorySlug`, `MEDIA` rows, and all unrelated fields remain unchanged. Wix product rows whose brand is not in the configured list are treated as unmanaged additional-import products and are preserved unchanged.
 
 DIAMOND products missing from the Wix export are converted into new Wix product rows and shown at the top of the update preview as `Neu`. These new products should be checked manually in Wix after import. In update mode, the `Beschreibung hinzufügen` button can load a DIAMOND report CSV and adds report descriptions only to those new rows.
 
